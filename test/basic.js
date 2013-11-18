@@ -1,329 +1,213 @@
-var test = require("tap").test
-  , LRU = require("../")
+/* global describe:true, beforeEach: true, it:true */
 
-test("basic", function (t) {
-  var cache = new LRU({max: 10})
-  cache.set("key", "value")
-  t.equal(cache.get("key"), "value")
-  t.equal(cache.get("nada"), undefined)
-  t.equal(cache.length, 1)
-  t.equal(cache.max, 10)
-  t.end()
-})
+var LRU = require('lru-cache'),
+    chai = require('chai'),
+    expect = chai.expect;
 
-test("least recently set", function (t) {
-  var cache = new LRU(2)
-  cache.set("a", "A")
-  cache.set("b", "B")
-  cache.set("c", "C")
-  t.equal(cache.get("c"), "C")
-  t.equal(cache.get("b"), "B")
-  t.equal(cache.get("a"), undefined)
-  t.end()
-})
-
-test("lru recently gotten", function (t) {
-  var cache = new LRU(2)
-  cache.set("a", "A")
-  cache.set("b", "B")
-  cache.get("a")
-  cache.set("c", "C")
-  t.equal(cache.get("c"), "C")
-  t.equal(cache.get("b"), undefined)
-  t.equal(cache.get("a"), "A")
-  t.end()
-})
-
-test("del", function (t) {
-  var cache = new LRU(2)
-  cache.set("a", "A")
-  cache.del("a")
-  t.equal(cache.get("a"), undefined)
-  t.end()
-})
-
-test("max", function (t) {
-  var cache = new LRU(3)
-
-  // test changing the max, verify that the LRU items get dropped.
-  cache.max = 100
-  for (var i = 0; i < 100; i ++) cache.set(i, i)
-  t.equal(cache.length, 100)
-  for (var i = 0; i < 100; i ++) {
-    t.equal(cache.get(i), i)
-  }
-  cache.max = 3
-  t.equal(cache.length, 3)
-  for (var i = 0; i < 97; i ++) {
-    t.equal(cache.get(i), undefined)
-  }
-  for (var i = 98; i < 100; i ++) {
-    t.equal(cache.get(i), i)
-  }
-
-  // now remove the max restriction, and try again.
-  cache.max = "hello"
-  for (var i = 0; i < 100; i ++) cache.set(i, i)
-  t.equal(cache.length, 100)
-  for (var i = 0; i < 100; i ++) {
-    t.equal(cache.get(i), i)
-  }
-  // should trigger an immediate resize
-  cache.max = 3
-  t.equal(cache.length, 3)
-  for (var i = 0; i < 97; i ++) {
-    t.equal(cache.get(i), undefined)
-  }
-  for (var i = 98; i < 100; i ++) {
-    t.equal(cache.get(i), i)
-  }
-  t.end()
-})
-
-test("reset", function (t) {
-  var cache = new LRU(10)
-  cache.set("a", "A")
-  cache.set("b", "B")
-  cache.reset()
-  t.equal(cache.length, 0)
-  t.equal(cache.max, 10)
-  t.equal(cache.get("a"), undefined)
-  t.equal(cache.get("b"), undefined)
-  t.end()
-})
+function calcLength(key ,val) {
+  return key.length + (JSON.stringify(val)).length;
+}
 
 
-// Note: `<cache>.dump()` is a debugging tool only. No guarantees are made
-// about the format/layout of the response.
-test("dump", function (t) {
-  var cache = new LRU(10)
-  var d = cache.dump();
-  t.equal(Object.keys(d).length, 0, "nothing in dump for empty cache")
-  cache.set("a", "A")
-  var d = cache.dump()  // { a: { key: "a", value: "A", lu: 0 } }
-  t.ok(d.a)
-  t.equal(d.a.key, "a")
-  t.equal(d.a.value, "A")
-  t.equal(d.a.lu, 0)
+describe('basic tests', function () {
 
-  cache.set("b", "B")
-  cache.get("b")
-  d = cache.dump()
-  t.ok(d.b)
-  t.equal(d.b.key, "b")
-  t.equal(d.b.value, "B")
-  t.equal(d.b.lu, 2)
+  beforeEach(function () {
+    window.localStorage.clear();
+  });
 
-  t.end()
-})
+  it('basic', function () {
+    var cache = new LRU(calcLength('key', 'value'));
+    cache.set('key', 'value');
+    expect(cache.get('key')).to.eq('value');
+    expect(cache.get('nada')).to.be.undefined;
+    expect(cache.length).to.eq(calcLength('key', 'value'));
+    expect(cache.max).to.eq(10);
+  });
+
+  it('least recently set', function () {
+    var cache = new LRU(2 * calcLength('a', 'A'));
+    cache.set('a', 'A');
+    cache.set('b', 'B');
+    cache.set('c', 'C');
+    expect(cache.get('c')).to.eq('C');
+    expect(cache.get('b')).to.eq('B');
+    expect(cache.get('a')).to.be.undefined;
+  });
+
+  it('lru recently gotten', function () {
+    var cache = new LRU(2 * calcLength('a', 'A'));
+    cache.set('a', 'A');
+    cache.set('b', 'B');
+    cache.get('a');
+    cache.set('c', 'C');
+    expect(cache.get('c')).to.eq('C');
+    expect(cache.get('b')).to.be.undefined;
+    expect(cache.get('a')).to.eq('A');
+  });
+
+  it('del', function () {
+    var cache = new LRU();
+    cache.set('a', 'A');
+    cache.del('a');
+    expect(cache.get('a')).to.be.undefined;
+  });
+
+  it('reset', function () {
+    var cache = new LRU(10 * calcLength('a', 'A'));
+    cache.set('a', 'A');
+    cache.set('b', 'B');
+    cache.reset();
+    expect(cache.length).to.eq(0);
+    expect(cache.max).to.eq(10 * calcLength('a', 'A'));
+    expect(cache.get('a')).to.be.undefined;
+    expect(cache.get('b')).to.be.undefined;
+  });
 
 
-test("basic with weighed length", function (t) {
-  var cache = new LRU({
-    max: 100,
-    length: function (item) { return item.size }
-  })
-  cache.set("key", {val: "value", size: 50})
-  t.equal(cache.get("key").val, "value")
-  t.equal(cache.get("nada"), undefined)
-  t.equal(cache.lengthCalculator(cache.get("key")), 50)
-  t.equal(cache.length, 50)
-  t.equal(cache.max, 100)
-  t.end()
-})
+  // Note: `<cache>.dump()` is a debugging tool only. No guarantees are made
+  // about the format/layout of the response.
+  it('dump', function () {
+    var cache = new LRU(10 * calcLength('a', 'A'));
+    var d = cache.dump();
+    expect(Object.keys(d).length).to.eq(0);
+    cache.set('a', 'A');
+    d = cache.dump();  // { a: { key: 'a', value: 'A', lu: 0 } }
+    expect(d.a).to.be.ok;
+    expect(d.a.key).to.eq('a');
+    expect(d.a.value).to.eq('A');
+    expect(d.a.lu).to.eq(0);
 
+    cache.set('b', 'B');
+    cache.get('b');
+    d = cache.dump();
+    expect(d.b).to.be.ok;
+    expect(d.b.key).to.eq('b');
+    expect(d.b.value).to.eq('B');
+    expect(d.b.lu).to.eq(2);
 
-test("weighed length item too large", function (t) {
-  var cache = new LRU({
-    max: 10,
-    length: function (item) { return item.size }
-  })
-  t.equal(cache.max, 10)
+  });
 
-  // should fall out immediately
-  cache.set("key", {val: "value", size: 50})
+  it('weighed length item too large', function () {
+    var cache = new LRU(10 * calcLength('a', 'A'));
 
-  t.equal(cache.length, 0)
-  t.equal(cache.get("key"), undefined)
-  t.end()
-})
+    expect(cache.max).to.eq(10 * calcLength('a', 'A'));
 
-test("least recently set with weighed length", function (t) {
-  var cache = new LRU({
-    max:8,
-    length: function (item) { return item.length }
-  })
-  cache.set("a", "A")
-  cache.set("b", "BB")
-  cache.set("c", "CCC")
-  cache.set("d", "DDDD")
-  t.equal(cache.get("d"), "DDDD")
-  t.equal(cache.get("c"), "CCC")
-  t.equal(cache.get("b"), undefined)
-  t.equal(cache.get("a"), undefined)
-  t.end()
-})
+    // should fall out immediately
+    cache.set('key', {val: 'way to big to fit in the store'});
 
-test("lru recently gotten with weighed length", function (t) {
-  var cache = new LRU({
-    max: 8,
-    length: function (item) { return item.length }
-  })
-  cache.set("a", "A")
-  cache.set("b", "BB")
-  cache.set("c", "CCC")
-  cache.get("a")
-  cache.get("b")
-  cache.set("d", "DDDD")
-  t.equal(cache.get("c"), undefined)
-  t.equal(cache.get("d"), "DDDD")
-  t.equal(cache.get("b"), "BB")
-  t.equal(cache.get("a"), "A")
-  t.end()
-})
+    expect(cache.length).to.eq(0);
+    expect(cache.get('key')).to.be.undefined;
+  });
 
-test("set returns proper booleans", function(t) {
-  var cache = new LRU({
-    max: 5,
-    length: function (item) { return item.length }
-  })
+  it('least recently set', function () {
+    var cache = new LRU(calcLength('a', 'DDDD') + calcLength('a', 'CCC'));
+    cache.set('a', 'A');
+    cache.set('b', 'BB');
+    cache.set('c', 'CCC');
+    cache.set('d', 'DDDD');
+    expect(cache.get('d')).to.eq('DDDD');
+    expect(cache.get('c')).to.eq('CCC');
+    expect(cache.get('b')).to.be.undefined;
+    expect(cache.get('a')).to.be.undefined;
+  });
 
-  t.equal(cache.set("a", "A"), true)
+  it('lru recently gotten', function () {
+    var max = calcLength('a', 'A') + calcLength('b', 'BB') + calcLength('d', 'DDDD'),
+        cache = new LRU(max);
 
-  // should return false for max exceeded
-  t.equal(cache.set("b", "donuts"), false)
+    cache.set('a', 'A');
+    cache.set('b', 'BB');
+    cache.set('c', 'CCC');
+    cache.get('a');
+    cache.get('b');
+    cache.set('d', 'DDDD');
+    expect(cache.get('c')).to.be.undefined;
+    expect(cache.get('d')).to.eq('DDDD');
+    expect(cache.get('b')).to.eq('BB');
+    expect(cache.get('a')).to.eq('A');
+  });
 
-  t.equal(cache.set("b", "B"), true)
-  t.equal(cache.set("c", "CCCC"), true)
-  t.end()
-})
+  it('set returns proper booleans', function() {
+    var cache = new LRU(calcLength('c', 'CCCC'));
 
-test("drop the old items", function(t) {
-  var cache = new LRU({
-    max: 5,
-    maxAge: 50
-  })
+    expect(cache.set('a', 'A')).to.be.ok;
 
-  cache.set("a", "A")
+    // should return false for max exceeded
+    expect(cache.set('b', 'donuts')).to.not.be.ok;
 
-  setTimeout(function () {
-    cache.set("b", "b")
-    t.equal(cache.get("a"), "A")
-  }, 25)
+    expect(cache.set('b', 'B')).to.be.ok;
+    expect(cache.set('c', 'CCCC')).to.be.ok;
+  });
 
-  setTimeout(function () {
-    cache.set("c", "C")
-    // timed out
-    t.notOk(cache.get("a"))
-  }, 60)
+  it('drop the old items', function(done) {
+    this.timeout(2000);
 
-  setTimeout(function () {
-    t.notOk(cache.get("b"))
-    t.equal(cache.get("c"), "C")
-  }, 90)
+    var cache = new LRU({
+      max: 5 * calcLength('a', 'A'),
+      maxAge: 250
+    });
 
-  setTimeout(function () {
-    t.notOk(cache.get("c"))
-    t.end()
-  }, 155)
-})
+    cache.set('a', 'A');
 
-test("disposal function", function(t) {
-  var disposed = false
-  var cache = new LRU({
-    max: 1,
-    dispose: function (k, n) {
-      disposed = n
-    }
-  })
+    setTimeout(function () {
+      cache.set('b', 'b');
+      expect(cache.get('a')).to.eq('A');
+    }, 100);
 
-  cache.set(1, 1)
-  cache.set(2, 2)
-  t.equal(disposed, 1)
-  cache.set(3, 3)
-  t.equal(disposed, 2)
-  cache.reset()
-  t.equal(disposed, 3)
-  t.end()
-})
+    setTimeout(function () {
+      cache.set('c', 'C');
+      expect(cache.get('a')).to.not.be.ok;
+    }, 400);
 
-test("disposal function on too big of item", function(t) {
-  var disposed = false
-  var cache = new LRU({
-    max: 1,
-    length: function (k) {
-      return k.length
-    },
-    dispose: function (k, n) {
-      disposed = n
-    }
-  })
-  var obj = [ 1, 2 ]
+    setTimeout(function () {
+      expect(cache.get('b')).to.not.be.ok;
+      expect(cache.get('c')).to.eq('C');
+    }, 500);
 
-  t.equal(disposed, false)
-  cache.set("obj", obj)
-  t.equal(disposed, obj)
-  t.end()
-})
+    setTimeout(function () {
+      expect(cache.get('c')).to.not.be.ok;
+      done();
+    }, 700);
+  });
 
-test("has()", function(t) {
-  var cache = new LRU({
-    max: 1,
-    maxAge: 10
-  })
+  it('lru update via set', function() {
+    var cache = LRU({ max: 2 * calcLength('foo', 1) });
 
-  cache.set('foo', 'bar')
-  t.equal(cache.has('foo'), true)
-  cache.set('blu', 'baz')
-  t.equal(cache.has('foo'), false)
-  t.equal(cache.has('blu'), true)
-  setTimeout(function() {
-    t.equal(cache.has('blu'), false)
-    t.end()
-  }, 15)
-})
+    cache.set('foo', 1);
+    cache.set('bar', 2);
+    cache.del('bar');
+    cache.set('baz', 3);
+    cache.set('qux', 4);
 
-test("stale", function(t) {
-  var cache = new LRU({
-    maxAge: 10,
-    stale: true
-  })
+    expect(cache.get('foo')).to.be.undefined;
+    expect(cache.get('bar')).to.be.undefined;
+    expect(cache.get('baz')).to.eq(3);
+    expect(cache.get('qux')).to.eq(4);
+  });
 
-  cache.set('foo', 'bar')
-  t.equal(cache.get('foo'), 'bar')
-  t.equal(cache.has('foo'), true)
-  setTimeout(function() {
-    t.equal(cache.has('foo'), false)
-    t.equal(cache.get('foo'), 'bar')
-    t.equal(cache.get('foo'), undefined)
-    t.end()
-  }, 15)
-})
+  it('least recently set w/ peek', function () {
+    var cache = LRU({ max: 2 * calcLength('a', 'A') });
+    cache.set('a', 'A');
+    cache.set('b', 'B');
+    expect(cache.peek('a')).to.eq('A');
+    cache.set('c', 'C');
+    expect(cache.get('c')).to.eq('C');
+    expect(cache.get('b')).to.eq('B');
+    expect(cache.get('a')).to.be.undefined;
+  });
 
-test("lru update via set", function(t) {
-  var cache = LRU({ max: 2 });
+  it('should return false when we reach ls max size', function (done) {
+    var cache = LRU(),
+        bigString = '',
+        i = 0;
+    for (var j = 0 ; j <= 1000000; j++) bigString += j%9;
 
-  cache.set('foo', 1);
-  cache.set('bar', 2);
-  cache.del('bar');
-  cache.set('baz', 3);
-  cache.set('qux', 4);
+    while (cache.set(i, bigString)) i++;
+    cache.set('last', 'smallstring');
+    expect(cache.get(i-1)).to.be.ok;
+    expect(cache.get(i)).to.be.ko;
+    expect(cache.get('last')).to.be.ok;
+    done();
+  });
 
-  t.equal(cache.get('foo'), undefined)
-  t.equal(cache.get('bar'), undefined)
-  t.equal(cache.get('baz'), 3)
-  t.equal(cache.get('qux'), 4)
-  t.end()
-})
-
-test("least recently set w/ peek", function (t) {
-  var cache = new LRU(2)
-  cache.set("a", "A")
-  cache.set("b", "B")
-  t.equal(cache.peek("a"), "A")
-  cache.set("c", "C")
-  t.equal(cache.get("c"), "C")
-  t.equal(cache.get("b"), "B")
-  t.equal(cache.get("a"), undefined)
-  t.end()
-})
+});

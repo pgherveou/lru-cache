@@ -1,15 +1,16 @@
 # lru cache
 
 A cache object that deletes the least-recently-used items.
+and use localstorage as storage.
+
+The code is forked and adapted from [node-lru-cache](https://github.com/isaacs/node-lru-cache)
+
 
 ## Usage:
 
 ```javascript
 var LRU = require("lru-cache")
-  , options = { max: 500
-              , length: function (n) { return n * 2 }
-              , dispose: function (key, n) { n.close() }
-              , maxAge: 1000 * 60 * 60 }
+  , options = {ns: 'cache-1', max: 500, maxAge: 1000 * 60 * 60 }
   , cache = LRU(options)
   , otherCache = LRU(50) // sets just the max size
 
@@ -26,31 +27,12 @@ away.
 
 ## Options
 
-* `max` The maximum size of the cache, checked by applying the length
-  function to all values in the cache.  Not setting this is kind of
-  silly, since that's the whole purpose of this lib, but it defaults
-  to `Infinity`.
+* `max` The maximum size of the cache,
+an item size is the length of its key and the stringify length of its value.
+if no size is specified the cache will keep adding items until the max size of the localstorage is reached.
 * `maxAge` Maximum age in ms.  Items are not pro-actively pruned out
   as they age, but if you try to get an item that is too old, it'll
   drop it and return undefined instead of giving it to you.
-* `length` Function that is used to calculate the length of stored
-  items.  If you're storing strings or buffers, then you probably want
-  to do something like `function(n){return n.length}`.  The default is
-  `function(n){return 1}`, which is fine if you want to store `n`
-  like-sized things.
-* `dispose` Function that is called on items when they are dropped
-  from the cache.  This can be handy if you want to close file
-  descriptors or do other cleanup tasks when items are no longer
-  accessible.  Called with `key, value`.  It's called *before*
-  actually removing the item from the internal cache, so if you want
-  to immediately put it back in, you'll have to do that in a
-  `nextTick` or `setTimeout` callback or it won't do anything.
-* `stale` By default, if you set a `maxAge`, it'll only actually pull
-  stale items out of the cache when you `get(key)`.  (That is, it's
-  not pre-emptively doing a `setTimeout` or anything.)  If you set
-  `stale:true`, it'll return the stale value before deleting it.  If
-  you don't set this, then it'll return `undefined` when you try to
-  get a stale entry, as if it had already been deleted.
 
 ## API
 

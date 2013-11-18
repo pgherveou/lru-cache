@@ -1,0 +1,13 @@
+{
+  "name": "lru-cache",
+  "description": "LRU cache for the browser backed by localstorage",
+  "dependencies": {
+    "pgherveou/store": "*"
+  },
+  "development": {
+    "chaijs/chai": "*"
+  },
+  "local": [],
+  "scripts": ["index.js"],
+  "main": "index.js"
+}

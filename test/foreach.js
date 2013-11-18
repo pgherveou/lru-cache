@@ -1,52 +1,75 @@
-var test = require('tap').test
-var LRU = require('../')
+/* global describe:true, it:true, beforeEach: true */
 
-test('forEach', function (t) {
-  var l = new LRU(5)
-  for (var i = 0; i < 10; i ++) {
-    l.set(i.toString(), i.toString(2))
-  }
+var LRU = require('lru-cache'),
+    chai = require('chai'),
+    expect = chai.expect;
 
-  var i = 9
-  l.forEach(function (val, key, cache) {
-    t.equal(cache, l)
-    t.equal(key, i.toString())
-    t.equal(val, i.toString(2))
-    i -= 1
-  })
+function calcLength(key ,val) {
+  return key.length + (JSON.stringify(val)).length;
+}
 
-  // get in order of most recently used
-  l.get(6)
-  l.get(8)
 
-  var order = [ 8, 6, 9, 7, 5 ]
-  var i = 0
+describe('foreach tests', function () {
 
-  l.forEach(function (val, key, cache) {
-    var j = order[i ++]
-    t.equal(cache, l)
-    t.equal(key, j.toString())
-    t.equal(val, j.toString(2))
-  })
+  beforeEach(function () {
+    window.localStorage.clear();
+  });
 
-  t.end()
-})
+  it('forEach', function () {
+    var l = new LRU(9 * calcLength('1', '1'));
+    var i;
 
-test('keys() and values()', function (t) {
-  var l = new LRU(5)
-  for (var i = 0; i < 10; i ++) {
-    l.set(i.toString(), i.toString(2))
-  }
+    for (i = 0; i < 10; i ++) {
+      l.set(i.toString(), i.toString(2));
+    }
 
-  t.similar(l.keys(), ['9', '8', '7', '6', '5'])
-  t.similar(l.values(), ['1001', '1000', '111', '110', '101'])
+    i = 9;
+    l.forEach(function (val, key, cache) {
+      expect(cache).to.eq(l);
+      expect(key).to.eq(i.toString());
+      expect(val).to.eq(i.toString(2));
+      i -= 1;
+    });
 
-  // get in order of most recently used
-  l.get(6)
-  l.get(8)
+    // get in order of most recently used
+    l.get(6);
+    l.get(8);
 
-  t.similar(l.keys(), ['8', '6', '9', '7', '5'])
-  t.similar(l.values(), ['1000', '110', '1001', '111', '101'])
+    var order = [ 8, 6, 9, 7, 5 ];
+    i = 0;
 
-  t.end()
-})
+    l.forEach(function (val, key, cache) {
+      var j = order[i ++];
+      expect(cache).to.eq(l);
+      expect(key).to.eq(j.toString());
+      expect(val).to.eq(j.toString(2));
+    });
+
+  });
+
+  it('keys() and values()', function () {
+
+    var max = calcLength('1', '1001')
+            + calcLength('2', '1000')
+            + calcLength('3', '111')
+            + calcLength('4', '110')
+            + calcLength('5', '101');
+
+    var l = new LRU(max);
+    for (var i = 0; i < 10; i ++) {
+      l.set(i.toString(), i.toString(2));
+    }
+
+    expect(l.keys()).to.deep.eq(['9', '8', '7', '6', '5']);
+    expect(l.values()).to.deep.eq(['1001', '1000', '111', '110', '101']);
+
+    // get in order of most recently used
+    l.get(6);
+    l.get(8);
+
+    expect(l.keys()).to.deep.eq(['8', '6', '9', '7', '5']);
+    expect(l.values()).to.deep.eq(['1000', '110', '1001', '111', '101']);
+
+  });
+});
+
