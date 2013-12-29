@@ -4795,6 +4795,14 @@ function Entry (key, value, lu, age, loaded) {\n\
 }\n\
 \n\
 /**\n\
+ * calculate entry age\n\
+ */\n\
+\n\
+Entry.prototype.getAge = function() {\n\
+  return Date.now() - this.age;\n\
+};\n\
+\n\
+/**\n\
  * cache class\n\
  * use ls store with `name` namespace defaulting to cache\n\
  */\n\
@@ -5019,7 +5027,7 @@ function LRUCache (options) {\n\
       if (cache.list[k]) {\n\
         i++;\n\
         var hit = cache.list[k];\n\
-        if (maxAge && (Date.now() - hit.age > maxAge)) {\n\
+        if (maxAge && (hit.getAge() > maxAge)) {\n\
           del(hit);\n\
           hit = undefined;\n\
         }\n\
@@ -5080,7 +5088,7 @@ function LRUCache (options) {\n\
   function get (key, doUse) {\n\
     var hit = cache.get(key);\n\
     if (hit) {\n\
-      if (maxAge && (Date.now() - hit.age > maxAge)) {\n\
+      if (maxAge && (hit.getAge() > maxAge)) {\n\
         del(hit);\n\
         hit = undefined;\n\
       } else {\n\
@@ -5128,6 +5136,7 @@ function LRUCache (options) {\n\
     length = 0;\n\
     itemCount = 0;\n\
   };\n\
+\n\
   /**\n\
    * Check if a key is in the cache,\n\
    * without updating the recent-ness or deleting it.\n\
@@ -5139,7 +5148,7 @@ function LRUCache (options) {\n\
   this.has = function (key) {\n\
     if (!cache.has(key)) return false;\n\
     var hit = cache.get(key);\n\
-    if (maxAge && (Date.now() - hit.age > maxAge)) {\n\
+    if (maxAge && (hit.getAge() > maxAge)) {\n\
       return false;\n\
     }\n\
     return true;\n\
@@ -5157,6 +5166,17 @@ function LRUCache (options) {\n\
     var v = get(key, true);\n\
     cache.update();\n\
     return v;\n\
+  };\n\
+\n\
+  /**\n\
+   * get key Entry\n\
+   *\n\
+   * @param  {String} key\n\
+   * @return {Object}\n\
+   */\n\
+\n\
+  this.getEntry = function (key) {\n\
+    return cache.get(key);\n\
   };\n\
 \n\
   /**\n\
