@@ -4778,6 +4778,9 @@ module.exports = function (obj) {\n\
 require.register("lru-cache/index.js", Function("exports, require, module",
 "var store = require('store');\n\
 \n\
+// max size if not specifed\n\
+var MAX_SIZE = 5000000;\n\
+\n\
 function hop (obj, key) {\n\
   return Object.prototype.hasOwnProperty.call(obj, key);\n\
 }\n\
@@ -4866,12 +4869,13 @@ Cache.prototype.has = function (key) {\n\
  */\n\
 \n\
 Cache.prototype.set = function (key, hit) {\n\
-  var length;\n\
+  var length, data;\n\
+\n\
   this.list[hit.lu] = this.items[key] = hit;\n\
   if (hit.loaded) {\n\
-    length = this.store.set(key, hit.value);\n\
-    if (!length) return false;\n\
-    hit.length =  key.toString().length + length;\n\
+    data = JSON.stringify(hit.value || null);\n\
+    hit.length =  key.toString().length + data.length;\n\
+    return !this.store.setItem(key, data);\n\
   }\n\
   return true;\n\
 };\n\
@@ -4912,7 +4916,7 @@ function LRUCache (options) {\n\
       maxAge = options.maxAge || null;\n\
 \n\
   // a little bit silly.  maybe this should throw?\n\
-  if (!max || ('number' !== typeof max) || max <= 0 ) max = Infinity;\n\
+  if (!max || ('number' !== typeof max) || max <= 0 ) max = MAX_SIZE;\n\
 \n\
   // states\n\
   var cache = new Cache(options.name),\n\
@@ -4929,7 +4933,7 @@ function LRUCache (options) {\n\
   Object.defineProperty(this, 'max',\n\
     {\n\
       set : function (mL) {\n\
-        if (!mL || ('number' !== typeof mL) || mL <= 0 ) mL = Infinity;\n\
+        if (!mL || ('number' !== typeof mL) || mL <= 0 ) mL = MAX_SIZE;\n\
         max = mL;\n\
         if (length > max) trim();\n\
       },\n\
@@ -5112,10 +5116,20 @@ function LRUCache (options) {\n\
     var res = cache.set(key, hit);\n\
 \n\
     // oversized objects fall out of cache automatically.\n\
-    if (!res || hit.length > max) {\n\
+    if (hit.length > max) {\n\
       cache.del(key);\n\
       return false;\n\
     }\n\
+\n\
+    // if we failed to save to ls\n\
+    // trim until it works\n\
+    while (!res && length) {\n\
+      del(cache.list[lru]);\n\
+      res = cache.set(key, hit);\n\
+    }\n\
+\n\
+    // failed to store to ls\n\
+    if (!res) return false;\n\
 \n\
     length += hit.length;\n\
     itemCount ++;\n\

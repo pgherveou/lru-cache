@@ -25,7 +25,7 @@ module.exports = function(grunt) {
           port: 3000,
           base: '',
           livereload: 35730,
-          open: 'http://localhost:3000/test/index.html'
+          open: 'http://localhost:3000/test'
         }
       }
     },
@@ -45,8 +45,11 @@ module.exports = function(grunt) {
         spawn: false
       },
       component: {
-        files: ['component.json', 'index.js'],
+        files: ['component.json', 'index.js', 'test/index.js'],
         tasks: ['shell:build']
+      },
+      demo: {
+        files: ['demo/index.html'],
       }
     }
   });

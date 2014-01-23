@@ -1,23 +1,28 @@
 {
-  "name": "component-lru-cache",
-  "description": "A cache object that deletes the least-recently-used items.",
-  "version": "2.3.1",
-  "author": "Isaac Z. Schlueter <i@izs.me>",
+  "name": "lru-cache",
+  "author": "PG Herveou",
 
-  "repository": "git://github.com/pgherveou/lru-cache.git",
+  "repository": {
+    "type": "git",
+    "url": "http://github.com/pgherveou/lru-cache"
+  },
+
+  "keywords": ["lru-cache"],
+
+  "license": "MIT",
+
+  "homepage": "https://github.com/pgherveou/lru-cache",
 
   "devDependencies": {
+    "mocha": "*",
+    "chai": "*",
     "grunt": "*",
     "grunt-shell": "*",
     "grunt-contrib-jshint": "*",
     "grunt-contrib-watch": "*",
     "grunt-contrib-connect": "*",
     "grunt-contrib-clean": "*"
-  },
-
-  "license": {
-    "type": "MIT",
-    "url": "http://github.com/isaacs/node-lru-cache/raw/master/LICENSE"
   }
-}
 
+
+}

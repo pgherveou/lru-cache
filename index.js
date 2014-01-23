@@ -1,5 +1,8 @@
 var store = require('store');
 
+// max size if not specifed
+var MAX_SIZE = 5000000;
+
 function hop (obj, key) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
@@ -88,12 +91,13 @@ Cache.prototype.has = function (key) {
  */
 
 Cache.prototype.set = function (key, hit) {
-  var length;
+  var length, data;
+
   this.list[hit.lu] = this.items[key] = hit;
   if (hit.loaded) {
-    length = this.store.set(key, hit.value);
-    if (!length) return false;
-    hit.length =  key.toString().length + length;
+    data = JSON.stringify(hit.value || null);
+    hit.length =  key.toString().length + data.length;
+    return !this.store.setItem(key, data);
   }
   return true;
 };
@@ -134,7 +138,7 @@ function LRUCache (options) {
       maxAge = options.maxAge || null;
 
   // a little bit silly.  maybe this should throw?
-  if (!max || ('number' !== typeof max) || max <= 0 ) max = Infinity;
+  if (!max || ('number' !== typeof max) || max <= 0 ) max = MAX_SIZE;
 
   // states
   var cache = new Cache(options.name),
@@ -151,7 +155,7 @@ function LRUCache (options) {
   Object.defineProperty(this, 'max',
     {
       set : function (mL) {
-        if (!mL || ('number' !== typeof mL) || mL <= 0 ) mL = Infinity;
+        if (!mL || ('number' !== typeof mL) || mL <= 0 ) mL = MAX_SIZE;
         max = mL;
         if (length > max) trim();
       },
@@ -334,10 +338,20 @@ function LRUCache (options) {
     var res = cache.set(key, hit);
 
     // oversized objects fall out of cache automatically.
-    if (!res || hit.length > max) {
+    if (hit.length > max) {
       cache.del(key);
       return false;
     }
+
+    // if we failed to save to ls
+    // trim until it works
+    while (!res && length) {
+      del(cache.list[lru]);
+      res = cache.set(key, hit);
+    }
+
+    // failed to store to ls
+    if (!res) return false;
 
     length += hit.length;
     itemCount ++;
