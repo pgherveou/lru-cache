@@ -1,38 +1,72 @@
 /* global describe:true, beforeEach: true, it:true */
 
 var LRU = require('lru-cache'),
-    store = require('pgherveou-store'),
+    lf = require('localforage'),
+    Promise = window.Promise,
     chai = require('chai'),
     expect = chai.expect;
+
+window.lf = lf;
+lf.setDriver('localStorageWrapper');
 
 function calcLength(key ,val) {
   return key.length + (JSON.stringify(val)).length;
 }
 
+Promise.prototype.end = function(done) {
+  this.then(null, done);
+};
 
 describe('basic tests', function () {
 
-  beforeEach(function () {
-    window.localStorage.clear();
+  beforeEach(function (done) {
+    lf.clear(done);
   });
 
-  it('basic', function () {
+  it('basic', function (done) {
     var cache = new LRU(calcLength('key', 'value'));
-    cache.set('key', 'value');
-    expect(cache.get('key')).to.eq('value');
-    expect(cache.get('nada')).to.be.undefined;
-    expect(cache.length).to.eq(calcLength('key', 'value'));
-    expect(cache.max).to.eq(10);
+
+    var p1 = cache
+      .set('key', 'value')
+      .then(function() {
+        return cache.get('key');
+      })
+      .then(function(val) {
+        expect(val).to.eq('value');
+      });
+
+    var p2 = cache
+      .get('nada')
+      .then(function(val) { expect(val).to.be.undefined; });
+
+    Promise
+      .all([p1, p2])
+      .then(function() {
+        expect(cache.length).to.eq(calcLength('key', 'value'));
+        expect(cache.max).to.eq(10);
+        done();
+      }).end(done);
   });
 
-  it('least recently set', function () {
+  it('least recently set', function (done) {
     var cache = new LRU(2 * calcLength('a', 'A'));
-    cache.set('a', 'A');
-    cache.set('b', 'B');
-    cache.set('c', 'C');
-    expect(cache.get('c')).to.eq('C');
-    expect(cache.get('b')).to.eq('B');
-    expect(cache.get('a')).to.be.undefined;
+
+    Promise.resolve()
+      .then(function() { return cache.set('a', 'A'); })
+      .then(function() { return cache.set('b', 'B'); })
+      .then(function() { return cache.set('c', 'C'); })
+
+      .then(function() { return cache.get('c'); })
+      .then(function(v) { expect(v).to.eq('C'); })
+
+      .then(function() { return cache.get('b'); })
+      .then(function(v) { expect(v).to.eq('B'); })
+
+      .then(function() {
+        return cache.get('a');
+      })
+      .then(function(v) { expect(v).to.be.undefined; })
+      .end(done);
   });
 
   it('lru recently gotten', function () {
@@ -203,13 +237,13 @@ describe('basic tests', function () {
     cache.set('first', 'smallstring');
 
     // store stuff in ls
-    while (!store.setItem(i, bigString)) i++;
+    while (!localStorage.setItem(i, bigString)) i++;
 
     // ls if full cache will return false
     expect(cache.set('one-more', bigString)).to.be.ko;
 
     // remove one
-    store.unset(0);
+    localStorage.removeItem(0);
 
     // we should have free up enough some space for our cache
     expect(cache.set('one-more', bigString)).to.be.ok;

@@ -1,22 +1,63 @@
-var store = require('store');
+var lf = require('localforage'),
+    Promise = window.Promise;
 
 // max size if not specifed
 var MAX_SIZE = 5000000;
+
+/**
+ * hasOwnProperty alias
+ * @param  {Object} obj
+ * @param  {String} key
+ *
+ * @return {Boolean}
+ */
 
 function hop (obj, key) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
 /**
+ * Store class
+ * thin layer on top of localforage to allow namespacing
+ */
+
+function Store(_) {
+  if (!(this instanceof Store)) return new Store(_);
+  this._ = _ || '_';
+}
+
+Store.prototype.setItem = function(key, val, cb) {
+  return lf.setItem(this._ + key, val, cb);
+};
+
+Store.prototype.save = function(val, cb) {
+  return this.setItem('', val, cb);
+};
+
+Store.prototype.getItem = function(key, cb) {
+  return lf.getItem(this._ + key, cb);
+};
+
+Store.prototype.get = function(cb) {
+  return lf.getItem('', cb);
+};
+
+Store.prototype.removeItem = function(key, cb) {
+  return lf.removeItem(this._ + key, cb);
+};
+
+/**
  * Entry Class
+ * container for lru items
  */
 
 function Entry (key, value, lu, age, loaded) {
   this.key = key;
+  this.value = value;
   this.lu = lu;
   this.age = age;
+  this.length = key.toString().length + JSON.stringify(value || null).length;
   this.loaded = loaded;
-  this.value = value;
 }
 
 /**
@@ -28,30 +69,45 @@ Entry.prototype.getAge = function() {
 };
 
 /**
- * cache class
- * use ls store with `name` namespace defaulting to cache
+ * Cache class
  */
 
 function Cache(name) {
-  this.store = store.ns(name || 'lru');
+
+  // namespaced storage instance
+  this.store = new Store(name || 'lru/');
+
+  // hash of items by key
   this.items = Object.create(null);
+
+  // list of items in order of use recency
   this.list = Object.create(null);
 }
 
 /**
  * update cache ls entries
+ *
+ * @return {Promise}
  */
 
 Cache.prototype.update = function () {
-  this.store.save(Object.keys(this.list).map(function (key) {
-    var item = this.list[key];
-    return {
-      key: item.key,
-      age: item.age,
-      lu: item.lu,
-      length: item.length
-    };
-  }, this));
+  var entries;
+
+  // serialize entries
+  entries = Object
+    .keys(this.list)
+    .map(function (key) {
+      var item = this.list[key];
+      return {
+        key: item.key,
+        age: item.age,
+        lu: item.lu,
+        length: item.length
+      };
+    }, this);
+
+  // save it
+  return this.store.save(entries);
 };
 
 /**
@@ -59,15 +115,26 @@ Cache.prototype.update = function () {
  * get entry value, load value from ls if value is not yet loaded
  *
  * @param {string} key
+ * @return {Promise}
  */
 
 Cache.prototype.get = function (key) {
-  if (!hop(this.items, key)) return;
+
+  // key does not exist
+  if (!hop(this.items, key)) return Promise.resolve();
+
+  // get item from mem store
   var item = this.items[key];
-  if (item.loaded) return item;
-  item.value = this.store.get(key);
-  item.loaded = true;
-  return item;
+  if (item.loaded) return Promise.resolve(item);
+
+  // load item from store
+  return this.store
+    .get(key)
+    .then(function(value) {
+      item.value = value;
+      item.loaded = true;
+      return item;
+    });
 };
 
 /**
@@ -83,23 +150,17 @@ Cache.prototype.has = function (key) {
 
 /**
  * set value
- * store it in ls and set entry length
+ * set entry length and store it cache
  *
  * @param {String} key
  * @param {Entry} hit
- * @return {Boolean} false if store failed to save the value
+ *
+ * @return {Promise}
  */
 
 Cache.prototype.set = function (key, hit) {
-  var length, data;
-
   this.list[hit.lu] = this.items[key] = hit;
-  if (hit.loaded) {
-    data = JSON.stringify(hit.value || null);
-    hit.length =  key.toString().length + data.length;
-    return !this.store.setItem(key, data);
-  }
-  return true;
+  return this.store.setItem(key, hit.value);
 };
 
 /**
@@ -110,7 +171,7 @@ Cache.prototype.set = function (key, hit) {
 
 Cache.prototype.del = function (key) {
   delete this.items[key];
-  this.store.del(key);
+  return this.store.removeItem(key);
 };
 
 /**
@@ -118,9 +179,21 @@ Cache.prototype.del = function (key) {
  */
 
 Cache.prototype.reset = function () {
-  this.store.reset();
-  this.items = Object.create(null);
-  this.list = Object.create(null);
+  var _this = this,
+      promises;
+
+  promises = Object
+    .keys(this.items)
+    .map(function(key) {
+      return _this.store.removeItem(key);
+    });
+
+  return Promise
+    .all(promises)
+    .then(function() {
+      _this.items = Object.create(null);
+      _this.list = Object.create(null);
+    });
 };
 
 /**
@@ -145,6 +218,7 @@ function LRUCache (options) {
       mru, // most recently used
       lru, // least recently used
       length, // number of items in the list
+      load,
       itemCount;
 
   /**
@@ -191,7 +265,8 @@ function LRUCache (options) {
    */
 
   function shiftLU(hit) {
-    // remvove hit
+
+    // remove hit
     delete cache.list[hit.lu];
 
     // update least recently used
@@ -215,54 +290,36 @@ function LRUCache (options) {
   }
 
   /**
-   * trim cache
-   * remove oldest items until length < max
-   */
-
-  function trim () {
-    while (lru < mru && length > max)
-      del(cache.list[lru]);
-  }
-
-  /**
    * delete entry in the cache
    *
    * @param  {Entry} hit
+   *
+   * @return {Promise}
    */
 
   function del(hit) {
-    if (hit) {
-      length -= hit.length;
-      itemCount--;
-      cache.del(hit.key);
-      shiftLU(hit);
-    }
+    if (!hit) return Promise.reject(new Error('no hit'));
+    length -= hit.length;
+    itemCount--;
+    shiftLU(hit);
+    return cache.del(hit.key);
   }
 
   /**
-   *  Iterates over all the keys in the cache, in order of recent-ness
+   * trim cache
+   * remove oldest items until length < max
    *
-   * @param  {Function} fn
-   * @param  {Object}   thisp [description]
+   * @return {Promise}
    */
 
-  this.forEach = function (fn, thisp) {
-    thisp = thisp || this;
-    var i = 0;
-    for (var k = mru - 1; k >= 0 && i < itemCount; k--) {
-      if (cache.list[k]) {
-        i++;
-        var hit = cache.list[k];
-        if (maxAge && (hit.getAge() > maxAge)) {
-          del(hit);
-          hit = undefined;
-        }
-        if (hit) {
-          fn.call(thisp, hit.value, hit.key, this);
-        }
-      }
+  function trim () {
+    var dels = [];
+    while (lru < mru && length > max) {
+      dels.push(del(cache.list[lru]));
     }
-  };
+
+    return Promise.all(dels);
+  }
 
   /**
    * Return an array of the keys in the cache.
@@ -283,24 +340,6 @@ function LRUCache (options) {
   };
 
   /**
-   * Return an array of the values in the cache.
-   *
-   * @return {Array}
-   */
-
-  this.values = function () {
-    var values = new Array(itemCount);
-    var i = 0;
-    for (var k = mru - 1; k >= 0 && i < itemCount; k--) {
-      if (cache.list[k]) {
-        var hit = cache.list[k];
-        values[i++] = hit.value;
-      }
-    }
-    return values;
-  };
-
-  /**
    * get a key in the cache
    * update LRU when `doUse` is true
    * delete expired keys
@@ -308,21 +347,18 @@ function LRUCache (options) {
    * @param  {String} key
    * @param  {Boolean} doUse update LRU
    *
-   * @return {Object} Entry value
+   * @return {Promise} promise of the Entry value
    */
 
   function get (key, doUse) {
-    var hit = cache.get(key);
-    if (hit) {
-      if (maxAge && (hit.getAge() > maxAge)) {
-        del(hit);
-        hit = undefined;
-      } else {
+    return cache
+      .get(key)
+      .then(function(hit) {
+        if (!hit) return;
+        if (maxAge && (hit.getAge() > maxAge)) return del(hit);
         if (doUse) use(hit);
-      }
-      if (hit) hit = hit.value;
-    }
-    return hit;
+        return hit.value;
+      });
   }
 
   /**
@@ -330,35 +366,38 @@ function LRUCache (options) {
    *
    * @param {String} key
    * @param {Object} value
+   *
+   * @return {Promise}
    */
 
   this.set = function (key, value) {
     var age = maxAge ? Date.now() : 0;
     var hit = new Entry(key, value, mru++, age, true);
-    var res = cache.set(key, hit);
 
     // oversized objects fall out of cache automatically.
-    if (hit.length > max) {
-      cache.del(key);
-      return false;
+    if (hit.length > max) return Promise.reject(new Error('oversized objects'));
+
+    // trim and retry until it works
+    function retry() {
+      var entry = cache.list[lru];
+      if (!entry) throw new Error('fail to set key ' + key);
+
+      return del(entry).then(function() {
+        return cache.set(key, hit);
+      });
     }
 
-    // if we failed to save to ls
-    // trim until it works
-    while (!res && length) {
-      del(cache.list[lru]);
-      res = cache.set(key, hit);
+    // update cache
+    function update() {
+      length += hit.length;
+      itemCount ++;
+      if (length > max) return trim();
+      return cache.update();
     }
 
-    // failed to store to ls
-    if (!res) return false;
-
-    length += hit.length;
-    itemCount ++;
-
-    if (length > max) trim();
-    cache.update();
-    return true;
+    return cache
+      .set(key, hit)
+      .then(update, retry);
   };
 
   /**
@@ -366,11 +405,11 @@ function LRUCache (options) {
    */
 
   this.reset = function () {
-    cache.reset();
     lru = 0;
     mru = 0;
     length = 0;
     itemCount = 0;
+    return cache.reset();
   };
 
   /**
@@ -384,9 +423,7 @@ function LRUCache (options) {
   this.has = function (key) {
     if (!cache.has(key)) return false;
     var hit = cache.get(key);
-    if (maxAge && (hit.getAge() > maxAge)) {
-      return false;
-    }
+    if (maxAge && (hit.getAge() > maxAge)) return false;
     return true;
   };
 
@@ -399,16 +436,17 @@ function LRUCache (options) {
    */
 
   this.get = function (key) {
-    var v = get(key, true);
-    cache.update();
-    return v;
+    return get(key, true).then(function(v) {
+      cache.update();
+      return v;
+    });
   };
 
   /**
    * get key Entry
    *
    * @param  {String} key
-   * @return {Object}
+   * @return {Promise}
    */
 
   this.getEntry = function (key) {
@@ -419,7 +457,7 @@ function LRUCache (options) {
    * get a key in the cache without updating the recent-ness
    *
    * @param  {String} key
-   * @return {Object}
+   * @return {Promise}
    */
 
   this.peek = function (key) {
@@ -438,28 +476,36 @@ function LRUCache (options) {
    * delete a key in the cache
    *
    * @param  {String} key
-   * @return {Object}
+   * @return {Promise}
    */
 
   this.del = function (key) {
-    cache.del(key);
-    cache.update();
+    cache.del(key).then(function() {
+      cache.update();
+    });
   };
 
   // init cache
-  var items = cache.store.get() || [];
   length = 0;
 
-  items.forEach(function (obj) {
-    var entry = new Entry (obj.key, null, obj.lu, obj.age);
-    entry.length = obj.length;
-    cache.set(obj.key, entry);
-    length += entry.length;
-  }, this);
+  // load cache
+  load = cache.store
+    .get()
+    .then(function(items) {
 
-  lru = (items[0] && items[0].lu) || 0;
-  mru = (items.length && items[items.length - 1].lu) || 0;
-  itemCount = items.length;
+      // init cache items
+      items.forEach(function (obj) {
+        var entry = new Entry (obj.key, null, obj.lu, obj.age);
+        entry.length = obj.length;
+        this.items[obj.key] = entry;
+        this.list[entry.lu] = entry;
+        length += entry.length;
+      }, this);
+
+      lru = (items[0] && items[0].lu) || 0;
+      mru = (items.length && items[items.length - 1].lu) || 0;
+      itemCount = items.length;
+    });
 }
 
 /*!

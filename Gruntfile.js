@@ -7,6 +7,7 @@ module.exports = function(grunt) {
 
     jshint: {
       all: [
+        'test/index.js',
         'Gruntfile.js',
         'index.js'
       ],
@@ -32,7 +33,7 @@ module.exports = function(grunt) {
 
     shell: {
       build: {
-        command: 'make build',
+        command: 'component build --dev',
         options: {
           stdout: true
         }
@@ -48,8 +49,9 @@ module.exports = function(grunt) {
         files: ['component.json', 'index.js', 'test/index.js'],
         tasks: ['shell:build']
       },
-      demo: {
-        files: ['demo/index.html'],
+      jshint: {
+        files: ['index.js', 'test/index.js'],
+        tasks: ['jshint']
       }
     }
   });
@@ -66,6 +68,7 @@ module.exports = function(grunt) {
   ]);
 
   grunt.registerTask('default', [
+    'jshint',
     'build',
     'connect',
     'watch'
