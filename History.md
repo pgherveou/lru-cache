@@ -1,4 +1,9 @@
 
+0.1.0 / 2014-04-09
+==================
+
+ * async api with promise and localforage
+
 0.0.2 / 2014-04-09
 ==================
 * final sync api version
