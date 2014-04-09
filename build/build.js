@@ -204,7 +204,7 @@ require.register("pgherveou-localforage/src/localforage.js", Function("exports, 
     'use strict';\n\
 \n\
     // Promises!\n\
-    var Promise = window.Promise;\n\
+    var Promise = this.Promise;\n\
 \n\
     // Avoid those magic constants!\n\
     var MODULE_TYPE_DEFINE = 1;\n\
@@ -224,9 +224,12 @@ require.register("pgherveou-localforage/src/localforage.js", Function("exports, 
     }\n\
 \n\
     // Initialize IndexedDB; fall back to vendor-prefixed versions if needed.\n\
-    var indexedDB = indexedDB || window.indexedDB || window.webkitIndexedDB ||\n\
-                    window.mozIndexedDB || window.OIndexedDB ||\n\
-                    window.msIndexedDB;\n\
+    var indexedDB = indexedDB || this.indexedDB || this.webkitIndexedDB ||\n\
+                    this.mozIndexedDB || this.OIndexedDB ||\n\
+                    this.msIndexedDB;\n\
+\n\
+    // Check for WebSQL.\n\
+    var openDatabase = this.openDatabase;\n\
 \n\
     // The actual localForage object that we expose as a module or via a global.\n\
     // It's extended by pulling in one of our other libraries.\n\
@@ -236,6 +239,8 @@ require.register("pgherveou-localforage/src/localforage.js", Function("exports, 
         LOCALSTORAGE: 'localStorageWrapper',\n\
         WEBSQL: 'webSQLStorage',\n\
 \n\
+        config: {},\n\
+\n\
         driver: function() {\n\
             return this._driver || null;\n\
         },\n\
@@ -243,17 +248,15 @@ require.register("pgherveou-localforage/src/localforage.js", Function("exports, 
         _ready: Promise.reject(new Error(\"setDriver() wasn't called\")),\n\
 \n\
         setDriver: function(driverName, callback) {\n\
-            this._ready = new Promise(function(resolve, reject) {\n\
+            var driverSet = new Promise(function(resolve, reject) {\n\
                 if ((!indexedDB && driverName === localForage.INDEXEDDB) ||\n\
-                    (!window.openDatabase && driverName === localForage.WEBSQL)) {\n\
-                    if (callback) {\n\
-                        callback(localForage);\n\
-                    }\n\
-\n\
+                    (!openDatabase && driverName === localForage.WEBSQL)) {\n\
                     reject(localForage);\n\
 \n\
                     return;\n\
                 }\n\
+\n\
+                localForage._ready = null;\n\
 \n\
                 // We allow localForage to be declared as a module or as a library\n\
                 // available without AMD/require.js.\n\
@@ -261,14 +264,11 @@ require.register("pgherveou-localforage/src/localforage.js", Function("exports, 
                     require([driverName], function(lib) {\n\
                         localForage._extend(lib);\n\
 \n\
-                        localForage._initStorage(window.localForageConfig).then(function() {\n\
-                            if (callback) {\n\
-                                callback(localForage);\n\
-                            }\n\
-\n\
-                            resolve(localForage);\n\
-                        });\n\
+                        resolve(localForage);\n\
                     });\n\
+\n\
+                    // Return here so we don't resolve the promise twice.\n\
+                    return;\n\
                 } else if (moduleType === MODULE_TYPE_EXPORT) {\n\
                     // Making it browserify friendly\n\
                     var driver;\n\
@@ -282,33 +282,26 @@ require.register("pgherveou-localforage/src/localforage.js", Function("exports, 
                         case localForage.WEBSQL:\n\
                             driver = require('./drivers/websql');\n\
                     }\n\
+\n\
                     localForage._extend(driver);\n\
-\n\
-                    localForage._initStorage(window.localForageConfig).then(function() {\n\
-                        if (callback) {\n\
-                            callback(localForage);\n\
-                        }\n\
-\n\
-                        resolve(localForage);\n\
-                    });\n\
                 } else {\n\
                     localForage._extend(_this[driverName]);\n\
-\n\
-                    localForage._initStorage(window.localForageConfig).then(function() {\n\
-                        if (callback) {\n\
-                            callback(localForage);\n\
-                        }\n\
-\n\
-                        resolve(localForage);\n\
-                    });\n\
                 }\n\
+\n\
+                resolve(localForage);\n\
             });\n\
 \n\
-            return localForage._ready;\n\
+            driverSet.then(callback, callback);\n\
+\n\
+            return driverSet;\n\
         },\n\
 \n\
         ready: function(callback) {\n\
-            this._ready.then(callback);\n\
+            if (this._ready === null) {\n\
+                this._ready = this._initStorage(this.config);\n\
+            }\n\
+\n\
+            this._ready.then(callback, callback);\n\
 \n\
             return this._ready;\n\
         },\n\
@@ -322,15 +315,24 @@ require.register("pgherveou-localforage/src/localforage.js", Function("exports, 
         }\n\
     };\n\
 \n\
+    // Select our storage library.\n\
     var storageLibrary;\n\
-    // Check to see if IndexedDB is available; it's our preferred backend\n\
-    // library.\n\
-    if (indexedDB) {\n\
+    // Check to see if IndexedDB is available and if it is the latest\n\
+    // implementation; it's our preferred backend library. We use \"_spec_test\"\n\
+    // as the name of the database because it's not the one we'll operate on,\n\
+    // but it's useful to make sure its using the right spec.\n\
+    // See: https://github.com/mozilla/localForage/issues/128\n\
+    if (indexedDB && indexedDB.open('_localforage_spec_test', 1).onupgradeneeded === null ) {\n\
         storageLibrary = localForage.INDEXEDDB;\n\
-    } else if (window.openDatabase) { // WebSQL is available, so we'll use that.\n\
+    } else if (openDatabase) { // WebSQL is available, so we'll use that.\n\
         storageLibrary = localForage.WEBSQL;\n\
     } else { // If nothing else is available, we use localStorage.\n\
         storageLibrary = localForage.LOCALSTORAGE;\n\
+    }\n\
+\n\
+    // If window.localForageConfig is set, use it for configuration.\n\
+    if (this.localForageConfig) {\n\
+        localForage.config = this.localForageConfig;\n\
     }\n\
 \n\
     // Set the (default) driver.\n\
@@ -356,7 +358,7 @@ require.register("pgherveou-localforage/src/drivers/indexeddb.js", Function("exp
 \n\
     // Originally found in https://github.com/mozilla-b2g/gaia/blob/e8f624e4cc9ea945727278039b3bc9bcb9f8667a/shared/js/async_storage.js\n\
 \n\
-    var Promise = window.Promise;\n\
+    var Promise = this.Promise;\n\
     var db = null;\n\
     var dbInfo = {\n\
         name: 'localforage',\n\
@@ -365,9 +367,9 @@ require.register("pgherveou-localforage/src/drivers/indexeddb.js", Function("exp
     };\n\
 \n\
     // Initialize IndexedDB; fall back to vendor-prefixed versions if needed.\n\
-    var indexedDB = indexedDB || window.indexedDB || window.webkitIndexedDB ||\n\
-                    window.mozIndexedDB || window.OIndexedDB ||\n\
-                    window.msIndexedDB;\n\
+    var indexedDB = indexedDB || this.indexedDB || this.webkitIndexedDB ||\n\
+                    this.mozIndexedDB || this.OIndexedDB ||\n\
+                    this.msIndexedDB;\n\
 \n\
     // If IndexedDB isn't available, we get outta here!\n\
     if (!indexedDB) {\n\
@@ -619,7 +621,7 @@ require.register("pgherveou-localforage/src/drivers/localstorage.js", Function("
     var dbInfo = {\n\
         name: 'localforage'\n\
     };\n\
-    var Promise = window.Promise;\n\
+    var Promise = this.Promise;\n\
     var localStorage = null;\n\
 \n\
     // If the app is running inside a Google Chrome packaged webapp, or some\n\
@@ -630,7 +632,7 @@ require.register("pgherveou-localforage/src/drivers/localstorage.js", Function("
     try {\n\
         // Initialize localStorage and create a variable to use throughout\n\
         // the code.\n\
-        localStorage = window.localStorage;\n\
+        localStorage = this.localStorage;\n\
     } catch (e) {\n\
         return;\n\
     }\n\
@@ -672,7 +674,7 @@ require.register("pgherveou-localforage/src/drivers/localstorage.js", Function("
     // the app's key/value store!\n\
     function clear(callback) {\n\
         var _this = this;\n\
-        return new Promise(function(resolve, reject) {\n\
+        return new Promise(function(resolve) {\n\
             _this.ready().then(function() {\n\
                 localStorage.clear();\n\
 \n\
@@ -718,7 +720,7 @@ require.register("pgherveou-localforage/src/drivers/localstorage.js", Function("
     // Same as localStorage's key() method, except takes a callback.\n\
     function key(n, callback) {\n\
         var _this = this;\n\
-        return new Promise(function(resolve, reject) {\n\
+        return new Promise(function(resolve) {\n\
             _this.ready().then(function() {\n\
                 var result = localStorage.key(n);\n\
 \n\
@@ -738,7 +740,7 @@ require.register("pgherveou-localforage/src/drivers/localstorage.js", Function("
     // Supply the number of keys in the datastore to the callback function.\n\
     function length(callback) {\n\
         var _this = this;\n\
-        return new Promise(function(resolve, reject) {\n\
+        return new Promise(function(resolve) {\n\
             _this.ready().then(function() {\n\
                 var result = localStorage.length;\n\
 \n\
@@ -754,7 +756,7 @@ require.register("pgherveou-localforage/src/drivers/localstorage.js", Function("
     // Remove an item from the store, nice and simple.\n\
     function removeItem(key, callback) {\n\
         var _this = this;\n\
-        return new Promise(function(resolve, reject) {\n\
+        return new Promise(function(resolve) {\n\
             _this.ready().then(function() {\n\
                 localStorage.removeItem(keyPrefix + key);\n\
 \n\
@@ -912,8 +914,9 @@ require.register("pgherveou-localforage/src/drivers/localstorage.js", Function("
             try {\n\
                 callback(null, JSON.stringify(value));\n\
             } catch (e) {\n\
-                console.error(\"Couldn't convert value into a JSON string: \",\n\
-                              value);\n\
+                if (window.console && window.console.error) {\n\
+                    window.console.error(\"Couldn't convert value into a JSON string: \", value);\n\
+                }\n\
                 callback(e);\n\
             }\n\
         }\n\
@@ -995,7 +998,8 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
     // verbose ways of binary <-> string data storage.\n\
     var BASE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';\n\
 \n\
-    var Promise = window.Promise;\n\
+    var Promise = this.Promise;\n\
+    var openDatabase = this.openDatabase;\n\
     var db = null;\n\
     var dbInfo = {\n\
         description: '',\n\
@@ -1025,7 +1029,7 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
     var TYPE_SERIALIZED_MARKER_LENGTH = SERIALIZED_MARKER_LENGTH + TYPE_ARRAYBUFFER.length;\n\
 \n\
     // If WebSQL methods aren't available, we can stop now.\n\
-    if (!window.openDatabase) {\n\
+    if (!openDatabase) {\n\
         return;\n\
     }\n\
 \n\
@@ -1040,11 +1044,11 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
             }\n\
         }\n\
 \n\
-        return new Promise(function(resolve, reject) {\n\
+        return new Promise(function(resolve) {\n\
             // Open the database; the openDatabase API will automatically\n\
             // create it for us if it doesn't exist.\n\
-            db = window.openDatabase(dbInfo.name, dbInfo.version,\n\
-                                     dbInfo.description, dbInfo.size);\n\
+            db = openDatabase(dbInfo.name, dbInfo.version, dbInfo.description,\n\
+                              dbInfo.size);\n\
 \n\
             // Create our key/value table if it doesn't exist.\n\
             db.transaction(function (t) {\n\
@@ -1057,7 +1061,7 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
 \n\
     function getItem(key, callback) {\n\
         var _this = this;\n\
-        return new Promise(function(resolve, reject) {\n\
+        return new Promise(function(resolve) {\n\
             _this.ready().then(function() {\n\
                 db.transaction(function (t) {\n\
                     t.executeSql('SELECT * FROM ' + dbInfo.storeName + ' WHERE key = ? LIMIT 1', [key], function (t, results) {\n\
@@ -1115,7 +1119,7 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
 \n\
     function removeItem(key, callback) {\n\
         var _this = this;\n\
-        return new Promise(function(resolve, reject) {\n\
+        return new Promise(function(resolve) {\n\
             _this.ready().then(function() {\n\
                 db.transaction(function (t) {\n\
                     t.executeSql('DELETE FROM ' + dbInfo.storeName + ' WHERE key = ?', [key], function() {\n\
@@ -1134,10 +1138,10 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
     // TODO: Find out if this resets the AUTO_INCREMENT number.\n\
     function clear(callback) {\n\
         var _this = this;\n\
-        return new Promise(function(resolve, reject) {\n\
+        return new Promise(function(resolve) {\n\
             _this.ready().then(function() {\n\
                 db.transaction(function (t) {\n\
-                    t.executeSql('DELETE FROM ' + dbInfo.storeName, [], function(t, results) {\n\
+                    t.executeSql('DELETE FROM ' + dbInfo.storeName, [], function() {\n\
                         if (callback) {\n\
                             callback();\n\
                         }\n\
@@ -1153,7 +1157,7 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
     // localForage.\n\
     function length(callback) {\n\
         var _this = this;\n\
-        return new Promise(function(resolve, reject) {\n\
+        return new Promise(function(resolve) {\n\
             _this.ready().then(function() {\n\
                 db.transaction(function (t) {\n\
                     // Ahhh, SQL makes this one soooooo easy.\n\
@@ -1180,7 +1184,7 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
     // TODO: Don't change ID on `setItem()`.\n\
     function key(n, callback) {\n\
         var _this = this;\n\
-        return new Promise(function(resolve, reject) {\n\
+        return new Promise(function(resolve) {\n\
             _this.ready().then(function() {\n\
                 db.transaction(function (t) {\n\
                     t.executeSql('SELECT key FROM ' + dbInfo.storeName + ' WHERE id = ? LIMIT 1', [n + 1], function (t, results) {\n\
@@ -1206,6 +1210,7 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
         var base64String = '';\n\
 \n\
         for (i = 0; i < bytes.length; i += 3) {\n\
+            /*jslint bitwise: true */\n\
             base64String += BASE_CHARS[bytes[i] >> 2];\n\
             base64String += BASE_CHARS[((bytes[i] & 3) << 4) | (bytes[i + 1] >> 4)];\n\
             base64String += BASE_CHARS[((bytes[i + 1] & 15) << 2) | (bytes[i + 2] >> 6)];\n\
@@ -1266,6 +1271,7 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
             encoded3 = BASE_CHARS.indexOf(serializedString[i+2]);\n\
             encoded4 = BASE_CHARS.indexOf(serializedString[i+3]);\n\
 \n\
+            /*jslint bitwise: true */\n\
             bytes[p++] = (encoded1 << 2) | (encoded2 >> 4);\n\
             bytes[p++] = ((encoded2 & 15) << 4) | (encoded3 >> 2);\n\
             bytes[p++] = ((encoded3 & 3) << 6) | (encoded4 & 63);\n\
@@ -1368,8 +1374,9 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
             try {\n\
                 callback(null, JSON.stringify(value));\n\
             } catch (e) {\n\
-                console.error(\"Couldn't convert value into a JSON string: \",\n\
-                              value);\n\
+                if (window.console && window.console.error) {\n\
+                    window.console.error(\"Couldn't convert value into a JSON string: \", value);\n\
+                }\n\
                 callback(e);\n\
             }\n\
         }\n\

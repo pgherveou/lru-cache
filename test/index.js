@@ -20,10 +20,9 @@ function wait(time) {
   return function() {
     return new Promise(function(resolve) {
       setTimeout(resolve, time);
-    })
+    });
   };
 }
-
 
 function calcLength(key ,val) {
   return key.length + (JSON.stringify(val)).length;
@@ -269,7 +268,7 @@ describe('when reloading', function () {
 
   before(function() {
     var cache = new LRU(calcLength('key', 'value'));
-    return cache.set('key', 'value')
+    return cache.set('key', 'value');
   });
 
   it('should retrieve existing values', function () {

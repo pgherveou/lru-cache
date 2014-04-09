@@ -1,10 +1,12 @@
 # lru cache
 
-A cache object that deletes the least-recently-used items.
-and use localstorage as storage.
+A Browser cache object that deletes the least-recently-used items.
+and use [localforage](https://github.com/mozilla/node-lru-cache) as storage.
 
 The code is forked and adapted from [node-lru-cache](https://github.com/isaacs/node-lru-cache)
 
+> **warning**  version `0.1.*` has an async api and use mozilla localforage to store cache objects
+> if you want a sync version that use localstorage use version `0.0.x`
 
 ## Usage:
 
@@ -14,10 +16,25 @@ var LRU = require("lru-cache")
   , cache = LRU(options)
   , otherCache = LRU(50) // sets just the max size
 
-cache.set("key", "value")
-cache.get("key") // "value"
 
-cache.reset()    // empty the cache
+// load cache from storage
+cache.load().then(function({
+  // cache is loaded
+})
+
+// ...
+
+// get an oject from the cache
+cache.get('key-1').then(function(v) {
+  // do something with value
+})
+
+// ...
+
+// save an oject into the cache
+cache.set('key-2', { foo: 'bar' }).then(function() {
+  // cache is saved
+})
 ```
 
 If you put more stuff in it, then items will fall out.
@@ -37,43 +54,62 @@ if no size is specified the cache will keep adding items until the max size of t
 ## API
 
 * `set(key, value)`
-* `get(key) => value`
+* `get(key)`
 
-    Both of these will update the "recently used"-ness of the key.
-    They do what you think.
+### get
+update the "recently used"-ness of the key, and returns a promise of the key value.
 
-* `peek(key)`
+#### value
+Type: `String`
 
-    Returns the key value (or `undefined` if not found) without
-    updating the "recently used"-ness of the key.
+#### return
+Type: `Promise`
 
-    (If you find yourself using this a lot, you *might* be using the
-    wrong sort of data structure, but there are some use cases where
-    it's handy.)
+### set
+save `value` and update the "recently used"-ness of the key
 
-* `del(key)`
+#### key
+Type: `String`
 
-    Deletes a key out of the cache.
+#### value
+Type: `Object`
 
-* `reset()`
+#### return
+Type: `Promise`
 
-    Clear the cache entirely, throwing away all values.
+### peek
+Returns a promise of the key value without updating the "recently used"-ness of the key.
 
-* `has(key)`
+#### value
+Type: `String`
 
-    Check if a key is in the cache, without updating the recent-ness
-    or deleting it for being stale.
+#### return
+Type: `Promise`
 
-* `forEach(function(value,key,cache), [thisp])`
+### del
+Deletes a key out of the cache.
 
-    Just like `Array.prototype.forEach`.  Iterates over all the keys
-    in the cache, in order of recent-ness.  (Ie, more recently used
-    items are iterated over first.)
+#### value
+Type: `String`
 
-* `keys()`
+##### reset
+Clear the cache entirely, throwing away all values.
 
-    Return an array of the keys in the cache.
+#### return
+Type: `Promise`
+a Promise that resolve when the change have been saved to storage.
 
-* `values()`
+### has
+Check if a key is in the cache, without updating the recent-ness or deleting it for being stale.
 
-    Return an array of the values in the cache.
+#### value
+Type: `String`
+
+#### return
+Type: `Boolean`
+
+### keys
+Return an array of the keys in the cache.
+
+#### return
+Type: `Array`
