@@ -199,181 +199,1211 @@ require.relative = function(parent) {
 
   return localRequire;
 };
-require.register("pgherveou-store/index.js", Function("exports, require, module",
-"var ls = window.localStorage;\n\
+require.register("pgherveou-localforage/src/localforage.js", Function("exports, require, module",
+"(function() {\n\
+    'use strict';\n\
 \n\
-/**\n\
- * test ls\n\
- */\n\
+    // Promises!\n\
+    var Promise = this.Promise;\n\
 \n\
-try {\n\
-  ls.setItem('store-test', 'test');\n\
-  ls.removeItem('store-test');\n\
-} catch(e) {\n\
-  ls = {\n\
-    clear: function () {},\n\
-    getItem: function () {},\n\
-    removeItem: function () {},\n\
-    setItem: function () {}\n\
-  };\n\
-}\n\
+    // Avoid those magic constants!\n\
+    var MODULE_TYPE_DEFINE = 1;\n\
+    var MODULE_TYPE_EXPORT = 2;\n\
+    var MODULE_TYPE_WINDOW = 3;\n\
 \n\
-/**\n\
- * Initialize a new store\n\
+    // Attaching to window (i.e. no module loader) is the assumed,\n\
+    // simple default.\n\
+    var moduleType = MODULE_TYPE_WINDOW;\n\
+\n\
+    // Find out what kind of module setup we have; if none, we'll just attach\n\
+    // localForage to the main window.\n\
+    if (typeof define === 'function' && define.amd) {\n\
+        moduleType = MODULE_TYPE_DEFINE;\n\
+    } else if (typeof module !== 'undefined' && module.exports) {\n\
+        moduleType = MODULE_TYPE_EXPORT;\n\
+    }\n\
+\n\
+    // Initialize IndexedDB; fall back to vendor-prefixed versions if needed.\n\
+    var indexedDB = indexedDB || this.indexedDB || this.webkitIndexedDB ||\n\
+                    this.mozIndexedDB || this.OIndexedDB ||\n\
+                    this.msIndexedDB;\n\
+\n\
+    // Check for WebSQL.\n\
+    var openDatabase = this.openDatabase;\n\
+\n\
+    // The actual localForage object that we expose as a module or via a global.\n\
+    // It's extended by pulling in one of our other libraries.\n\
+    var _this = this;\n\
+    var localForage = {\n\
+        INDEXEDDB: 'asyncStorage',\n\
+        LOCALSTORAGE: 'localStorageWrapper',\n\
+        WEBSQL: 'webSQLStorage',\n\
+\n\
+        config: {},\n\
+\n\
+        driver: function() {\n\
+            return this._driver || null;\n\
+        },\n\
+\n\
+        _ready: Promise.reject(new Error(\"setDriver() wasn't called\")),\n\
+\n\
+        setDriver: function(driverName, callback) {\n\
+            var driverSet = new Promise(function(resolve, reject) {\n\
+                if ((!indexedDB && driverName === localForage.INDEXEDDB) ||\n\
+                    (!openDatabase && driverName === localForage.WEBSQL)) {\n\
+                    reject(localForage);\n\
+\n\
+                    return;\n\
+                }\n\
+\n\
+                localForage._ready = null;\n\
+\n\
+                // We allow localForage to be declared as a module or as a library\n\
+                // available without AMD/require.js.\n\
+                if (moduleType === MODULE_TYPE_DEFINE) {\n\
+                    require([driverName], function(lib) {\n\
+                        localForage._extend(lib);\n\
+\n\
+                        resolve(localForage);\n\
+                    });\n\
+\n\
+                    // Return here so we don't resolve the promise twice.\n\
+                    return;\n\
+                } else if (moduleType === MODULE_TYPE_EXPORT) {\n\
+                    // Making it browserify friendly\n\
+                    var driver;\n\
+                    switch (driverName) {\n\
+                        case localForage.INDEXEDDB:\n\
+                            driver = require('./drivers/indexeddb');\n\
+                            break;\n\
+                        case localForage.LOCALSTORAGE:\n\
+                            driver = require('./drivers/localstorage');\n\
+                            break;\n\
+                        case localForage.WEBSQL:\n\
+                            driver = require('./drivers/websql');\n\
+                    }\n\
+\n\
+                    localForage._extend(driver);\n\
+                } else {\n\
+                    localForage._extend(_this[driverName]);\n\
+                }\n\
+\n\
+                resolve(localForage);\n\
+            });\n\
+\n\
+            driverSet.then(callback, callback);\n\
+\n\
+            return driverSet;\n\
+        },\n\
+\n\
+        ready: function(callback) {\n\
+            if (this._ready === null) {\n\
+                this._ready = this._initStorage(this.config);\n\
+            }\n\
+\n\
+            this._ready.then(callback, callback);\n\
+\n\
+            return this._ready;\n\
+        },\n\
+\n\
+        _extend: function(libraryMethodsAndProperties) {\n\
+            for (var i in libraryMethodsAndProperties) {\n\
+                if (libraryMethodsAndProperties.hasOwnProperty(i)) {\n\
+                    this[i] = libraryMethodsAndProperties[i];\n\
+                }\n\
+            }\n\
+        }\n\
+    };\n\
+\n\
+    // Select our storage library.\n\
+    var storageLibrary;\n\
+    // Check to see if IndexedDB is available and if it is the latest\n\
+    // implementation; it's our preferred backend library. We use \"_spec_test\"\n\
+    // as the name of the database because it's not the one we'll operate on,\n\
+    // but it's useful to make sure its using the right spec.\n\
+    // See: https://github.com/mozilla/localForage/issues/128\n\
+    if (indexedDB && indexedDB.open('_localforage_spec_test', 1).onupgradeneeded === null ) {\n\
+        storageLibrary = localForage.INDEXEDDB;\n\
+    } else if (openDatabase) { // WebSQL is available, so we'll use that.\n\
+        storageLibrary = localForage.WEBSQL;\n\
+    } else { // If nothing else is available, we use localStorage.\n\
+        storageLibrary = localForage.LOCALSTORAGE;\n\
+    }\n\
+\n\
+    // If window.localForageConfig is set, use it for configuration.\n\
+    if (this.localForageConfig) {\n\
+        localForage.config = this.localForageConfig;\n\
+    }\n\
+\n\
+    // Set the (default) driver.\n\
+    localForage.setDriver(storageLibrary);\n\
+\n\
+    // We allow localForage to be declared as a module or as a library\n\
+    // available without AMD/require.js.\n\
+    if (moduleType === MODULE_TYPE_DEFINE) {\n\
+        define(function() {\n\
+            return localForage;\n\
+        });\n\
+    } else if (moduleType === MODULE_TYPE_EXPORT) {\n\
+        module.exports = localForage;\n\
+    } else {\n\
+        this.localforage = localForage;\n\
+    }\n\
+}).call(this);\n\
+//@ sourceURL=pgherveou-localforage/src/localforage.js"
+));
+require.register("pgherveou-localforage/src/drivers/indexeddb.js", Function("exports, require, module",
+"(function() {\n\
+    'use strict';\n\
+\n\
+    // Originally found in https://github.com/mozilla-b2g/gaia/blob/e8f624e4cc9ea945727278039b3bc9bcb9f8667a/shared/js/async_storage.js\n\
+\n\
+    var Promise = this.Promise;\n\
+    var db = null;\n\
+    var dbInfo = {\n\
+        name: 'localforage',\n\
+        storeName: 'keyvaluepairs',\n\
+        version: 1\n\
+    };\n\
+\n\
+    // Initialize IndexedDB; fall back to vendor-prefixed versions if needed.\n\
+    var indexedDB = indexedDB || this.indexedDB || this.webkitIndexedDB ||\n\
+                    this.mozIndexedDB || this.OIndexedDB ||\n\
+                    this.msIndexedDB;\n\
+\n\
+    // If IndexedDB isn't available, we get outta here!\n\
+    if (!indexedDB) {\n\
+        return;\n\
+    }\n\
+\n\
+    // Open the IndexedDB database (automatically creates one if one didn't\n\
+    // previously exist), using any options set in window.localForageConfig.\n\
+    function _initStorage(options) {\n\
+        if (options) {\n\
+            for (var i in dbInfo) {\n\
+                if (options[i] !== undefined) {\n\
+                    dbInfo[i] = options[i];\n\
+                }\n\
+            }\n\
+        }\n\
+\n\
+        return new Promise(function(resolve, reject) {\n\
+            var openreq = indexedDB.open(dbInfo.name, dbInfo.version);\n\
+            openreq.onerror = function withStoreOnError() {\n\
+                reject(openreq.error.name);\n\
+            };\n\
+            openreq.onupgradeneeded = function withStoreOnUpgradeNeeded() {\n\
+                // First time setup: create an empty object store\n\
+                openreq.result.createObjectStore(dbInfo.storeName);\n\
+            };\n\
+            openreq.onsuccess = function withStoreOnSuccess() {\n\
+                db = openreq.result;\n\
+                resolve();\n\
+            };\n\
+        });\n\
+    }\n\
+\n\
+    function getItem(key, callback) {\n\
+        var _this = this;\n\
+        return new Promise(function(resolve, reject) {\n\
+            _this.ready().then(function() {\n\
+                var store = db.transaction(dbInfo.storeName, 'readonly').objectStore(dbInfo.storeName);\n\
+                var req = store.get(key);\n\
+                req.onsuccess = function getItemOnSuccess() {\n\
+                    var value = req.result;\n\
+                    if (value === undefined) {\n\
+                        value = null;\n\
+                    }\n\
+                    if (callback) {\n\
+                        callback(value);\n\
+                    }\n\
+\n\
+                    resolve(value);\n\
+                };\n\
+                req.onerror = function getItemOnError() {\n\
+                    reject(req.error.name);\n\
+                };\n\
+            });\n\
+        });\n\
+    }\n\
+\n\
+    function setItem(key, value, callback) {\n\
+        var _this = this;\n\
+        return new Promise(function(resolve, reject) {\n\
+            _this.ready().then(function() {\n\
+                var store = db.transaction(dbInfo.storeName, 'readwrite').objectStore(dbInfo.storeName);\n\
+\n\
+                // Cast to undefined so the value passed to callback/promise is\n\
+                // the same as what one would get out of `getItem()` later.\n\
+                // This leads to some weirdness (setItem('foo', undefined) will\n\
+                // return \"null\"), but it's not my fault localStorage is our\n\
+                // baseline and that it's weird.\n\
+                if (value === undefined) {\n\
+                    value = null;\n\
+                }\n\
+\n\
+                var req = store.put(value, key);\n\
+                req.onsuccess = function setItemOnSuccess() {\n\
+                    if (callback) {\n\
+                        callback(value);\n\
+                    }\n\
+\n\
+                    resolve(value);\n\
+                };\n\
+                req.onerror = function setItemOnError() {\n\
+                    reject(req.error.name);\n\
+                };\n\
+            });\n\
+        });\n\
+    }\n\
+\n\
+    function removeItem(key, callback) {\n\
+        var _this = this;\n\
+        return new Promise(function(resolve, reject) {\n\
+            _this.ready().then(function() {\n\
+                var store = db.transaction(dbInfo.storeName, 'readwrite').objectStore(dbInfo.storeName);\n\
+\n\
+                // We use `['delete']` instead of `.delete` because IE 8 will\n\
+                // throw a fit if it sees the reserved word \"delete\" in this\n\
+                // scenario. See: https://github.com/mozilla/localForage/pull/67\n\
+                //\n\
+                // This can be removed once we no longer care about IE 8, for\n\
+                // what that's worth.\n\
+                // TODO: Write a test against this? Maybe IE in general? Also,\n\
+                // make sure the minify step doesn't optimise this to `.delete`,\n\
+                // though it currently doesn't.\n\
+                var req = store['delete'](key);\n\
+                req.onsuccess = function removeItemOnSuccess() {\n\
+                    if (callback) {\n\
+                        callback();\n\
+                    }\n\
+                    resolve();\n\
+                };\n\
+                req.onerror = function removeItemOnError() {\n\
+                    reject(req.error.name);\n\
+                };\n\
+            });\n\
+        });\n\
+    }\n\
+\n\
+    function clear(callback) {\n\
+        var _this = this;\n\
+        return new Promise(function(resolve, reject) {\n\
+            _this.ready().then(function() {\n\
+                var store = db.transaction(dbInfo.storeName, 'readwrite').objectStore(dbInfo.storeName);\n\
+                var req = store.clear();\n\
+                req.onsuccess = function clearOnSuccess() {\n\
+                    if (callback) {\n\
+                        callback();\n\
+                    }\n\
+\n\
+                    resolve();\n\
+                };\n\
+                req.onerror = function clearOnError() {\n\
+                    reject(req.error.name);\n\
+                };\n\
+            });\n\
+        });\n\
+    }\n\
+\n\
+    function length(callback) {\n\
+        var _this = this;\n\
+        return new Promise(function(resolve, reject) {\n\
+            _this.ready().then(function() {\n\
+                var store = db.transaction(dbInfo.storeName, 'readonly').objectStore(dbInfo.storeName);\n\
+                var req = store.count();\n\
+                req.onsuccess = function lengthOnSuccess() {\n\
+                    if (callback) {\n\
+                        callback(req.result);\n\
+                    }\n\
+\n\
+                    resolve(req.result);\n\
+                };\n\
+                req.onerror = function lengthOnError() {\n\
+                    reject(req.error.name);\n\
+                };\n\
+            });\n\
+        });\n\
+    }\n\
+\n\
+    function key(n, callback) {\n\
+        var _this = this;\n\
+        return new Promise(function(resolve, reject) {\n\
+            if (n < 0) {\n\
+                if (callback) {\n\
+                    callback(null);\n\
+                }\n\
+\n\
+                resolve(null);\n\
+\n\
+                return;\n\
+            }\n\
+\n\
+            _this.ready().then(function() {\n\
+                var store = db.transaction(dbInfo.storeName, 'readonly').objectStore(dbInfo.storeName);\n\
+\n\
+                var advanced = false;\n\
+                var req = store.openCursor();\n\
+                req.onsuccess = function keyOnSuccess() {\n\
+                    var cursor = req.result;\n\
+                    if (!cursor) {\n\
+                        // this means there weren't enough keys\n\
+                        if (callback) {\n\
+                            callback(null);\n\
+                        }\n\
+\n\
+                        resolve(null);\n\
+\n\
+                        return;\n\
+                    }\n\
+                    if (n === 0) {\n\
+                        // We have the first key, return it if that's what they wanted\n\
+                        if (callback) {\n\
+                            callback(cursor.key);\n\
+                        }\n\
+\n\
+                        resolve(cursor.key);\n\
+                    } else {\n\
+                        if (!advanced) {\n\
+                            // Otherwise, ask the cursor to skip ahead n records\n\
+                            advanced = true;\n\
+                            cursor.advance(n);\n\
+                        } else {\n\
+                            // When we get here, we've got the nth key.\n\
+                            if (callback) {\n\
+                                callback(cursor.key);\n\
+                            }\n\
+\n\
+                            resolve(cursor.key);\n\
+                        }\n\
+                    }\n\
+                };\n\
+\n\
+                req.onerror = function keyOnError() {\n\
+                    reject(req.error.name);\n\
+                };\n\
+            });\n\
+        });\n\
+    }\n\
+\n\
+    var asyncStorage = {\n\
+        _driver: 'asyncStorage',\n\
+        _initStorage: _initStorage,\n\
+        getItem: getItem,\n\
+        setItem: setItem,\n\
+        removeItem: removeItem,\n\
+        clear: clear,\n\
+        length: length,\n\
+        key: key\n\
+    };\n\
+\n\
+    if (typeof define === 'function' && define.amd) {\n\
+        define('asyncStorage', function() {\n\
+            return asyncStorage;\n\
+        });\n\
+    } else if (typeof module !== 'undefined' && module.exports) {\n\
+        module.exports = asyncStorage;\n\
+    } else {\n\
+        this.asyncStorage = asyncStorage;\n\
+    }\n\
+}).call(this);\n\
+//@ sourceURL=pgherveou-localforage/src/drivers/indexeddb.js"
+));
+require.register("pgherveou-localforage/src/drivers/localstorage.js", Function("exports, require, module",
+"// If IndexedDB isn't available, we'll fall back to localStorage.\n\
+// Note that this will have considerable performance and storage\n\
+// side-effects (all data will be serialized on save and only data that\n\
+// can be converted to a string via `JSON.stringify()` will be saved).\n\
+(function() {\n\
+    'use strict';\n\
+\n\
+    var keyPrefix = '';\n\
+    var dbInfo = {\n\
+        name: 'localforage'\n\
+    };\n\
+    var Promise = this.Promise;\n\
+    var localStorage = null;\n\
+\n\
+    // If the app is running inside a Google Chrome packaged webapp, or some\n\
+    // other context where localStorage isn't available, we don't use\n\
+    // localStorage. This feature detection is preferred over the old\n\
+    // `if (window.chrome && window.chrome.runtime)` code.\n\
+    // See: https://github.com/mozilla/localForage/issues/68\n\
+    try {\n\
+        // Initialize localStorage and create a variable to use throughout\n\
+        // the code.\n\
+        localStorage = this.localStorage;\n\
+    } catch (e) {\n\
+        return;\n\
+    }\n\
+\n\
+    // Config the localStorage backend, using options set in\n\
+    // window.localForageConfig.\n\
+    function _initStorage(options) {\n\
+        if (options) {\n\
+            for (var i in dbInfo) {\n\
+                if (options[i] !== undefined) {\n\
+                    dbInfo[i] = options[i];\n\
+                }\n\
+            }\n\
+        }\n\
+\n\
+        keyPrefix = dbInfo.name + '/';\n\
+\n\
+        return Promise.resolve();\n\
+    }\n\
+\n\
+    var SERIALIZED_MARKER = '__lfsc__:';\n\
+    var SERIALIZED_MARKER_LENGTH = SERIALIZED_MARKER.length;\n\
+\n\
+    // OMG the serializations!\n\
+    var TYPE_ARRAYBUFFER = 'arbf';\n\
+    var TYPE_BLOB = 'blob';\n\
+    var TYPE_INT8ARRAY = 'si08';\n\
+    var TYPE_UINT8ARRAY = 'ui08';\n\
+    var TYPE_UINT8CLAMPEDARRAY = 'uic8';\n\
+    var TYPE_INT16ARRAY = 'si16';\n\
+    var TYPE_INT32ARRAY = 'si32';\n\
+    var TYPE_UINT16ARRAY = 'ur16';\n\
+    var TYPE_UINT32ARRAY = 'ui32';\n\
+    var TYPE_FLOAT32ARRAY = 'fl32';\n\
+    var TYPE_FLOAT64ARRAY = 'fl64';\n\
+    var TYPE_SERIALIZED_MARKER_LENGTH = SERIALIZED_MARKER_LENGTH + TYPE_ARRAYBUFFER.length;\n\
+\n\
+    // Remove all keys from the datastore, effectively destroying all data in\n\
+    // the app's key/value store!\n\
+    function clear(callback) {\n\
+        var _this = this;\n\
+        return new Promise(function(resolve) {\n\
+            _this.ready().then(function() {\n\
+                localStorage.clear();\n\
+\n\
+                if (callback) {\n\
+                    callback();\n\
+                }\n\
+\n\
+                resolve();\n\
+            });\n\
+        });\n\
+    }\n\
+\n\
+    // Retrieve an item from the store. Unlike the original async_storage\n\
+    // library in Gaia, we don't modify return values at all. If a key's value\n\
+    // is `undefined`, we pass that value to the callback function.\n\
+    function getItem(key, callback) {\n\
+        var _this = this;\n\
+        return new Promise(function(resolve, reject) {\n\
+            _this.ready().then(function() {\n\
+                try {\n\
+                    var result = localStorage.getItem(keyPrefix + key);\n\
+\n\
+                    // If a result was found, parse it from the serialized\n\
+                    // string into a JS object. If result isn't truthy, the key\n\
+                    // is likely undefined and we'll pass it straight to the\n\
+                    // callback.\n\
+                    if (result) {\n\
+                        result = _deserialize(result);\n\
+                    }\n\
+\n\
+                    if (callback) {\n\
+                        callback(result);\n\
+                    }\n\
+\n\
+                    resolve(result);\n\
+                } catch (e) {\n\
+                    reject(e);\n\
+                }\n\
+            });\n\
+        });\n\
+    }\n\
+\n\
+    // Same as localStorage's key() method, except takes a callback.\n\
+    function key(n, callback) {\n\
+        var _this = this;\n\
+        return new Promise(function(resolve) {\n\
+            _this.ready().then(function() {\n\
+                var result = localStorage.key(n);\n\
+\n\
+                // Remove the prefix from the key, if a key is found.\n\
+                if (result) {\n\
+                    result = result.substring(keyPrefix.length);\n\
+                }\n\
+\n\
+                if (callback) {\n\
+                    callback(result);\n\
+                }\n\
+                resolve(result);\n\
+            });\n\
+        });\n\
+    }\n\
+\n\
+    // Supply the number of keys in the datastore to the callback function.\n\
+    function length(callback) {\n\
+        var _this = this;\n\
+        return new Promise(function(resolve) {\n\
+            _this.ready().then(function() {\n\
+                var result = localStorage.length;\n\
+\n\
+                if (callback) {\n\
+                    callback(result);\n\
+                }\n\
+\n\
+                resolve(result);\n\
+            });\n\
+        });\n\
+    }\n\
+\n\
+    // Remove an item from the store, nice and simple.\n\
+    function removeItem(key, callback) {\n\
+        var _this = this;\n\
+        return new Promise(function(resolve) {\n\
+            _this.ready().then(function() {\n\
+                localStorage.removeItem(keyPrefix + key);\n\
+\n\
+                if (callback) {\n\
+                    callback();\n\
+                }\n\
+\n\
+                resolve();\n\
+            });\n\
+        });\n\
+    }\n\
+\n\
+    // Deserialize data we've inserted into a value column/field. We place\n\
+    // special markers into our strings to mark them as encoded; this isn't\n\
+    // as nice as a meta field, but it's the only sane thing we can do whilst\n\
+    // keeping localStorage support intact.\n\
+    //\n\
+    // Oftentimes this will just deserialize JSON content, but if we have a\n\
+    // special marker (SERIALIZED_MARKER, defined above), we will extract\n\
+    // some kind of arraybuffer/binary data/typed array out of the string.\n\
+    function _deserialize(value) {\n\
+        // If we haven't marked this string as being specially serialized (i.e.\n\
+        // something other than serialized JSON), we can just return it and be\n\
+        // done with it.\n\
+        if (value.substring(0, SERIALIZED_MARKER_LENGTH) !== SERIALIZED_MARKER) {\n\
+            return JSON.parse(value);\n\
+        }\n\
+\n\
+        // The following code deals with deserializing some kind of Blob or\n\
+        // TypedArray. First we separate out the type of data we're dealing\n\
+        // with from the data itself.\n\
+        var serializedString = value.substring(TYPE_SERIALIZED_MARKER_LENGTH);\n\
+        var type = value.substring(SERIALIZED_MARKER_LENGTH, TYPE_SERIALIZED_MARKER_LENGTH);\n\
+\n\
+        // Fill the string into a ArrayBuffer.\n\
+        var buffer = new ArrayBuffer(serializedString.length * 2); // 2 bytes for each char\n\
+        var bufferView = new Uint16Array(buffer);\n\
+        for (var i = serializedString.length - 1; i >= 0; i--) {\n\
+            bufferView[i] = serializedString.charCodeAt(i);\n\
+        }\n\
+\n\
+        // Return the right type based on the code/type set during\n\
+        // serialization.\n\
+        switch (type) {\n\
+            case TYPE_ARRAYBUFFER:\n\
+                return buffer;\n\
+            case TYPE_BLOB:\n\
+                return new Blob([buffer]);\n\
+            case TYPE_INT8ARRAY:\n\
+                return new Int8Array(buffer);\n\
+            case TYPE_UINT8ARRAY:\n\
+                return new Uint8Array(buffer);\n\
+            case TYPE_UINT8CLAMPEDARRAY:\n\
+                return new Uint8ClampedArray(buffer);\n\
+            case TYPE_INT16ARRAY:\n\
+                return new Int16Array(buffer);\n\
+            case TYPE_UINT16ARRAY:\n\
+                return new Uint16Array(buffer);\n\
+            case TYPE_INT32ARRAY:\n\
+                return new Int32Array(buffer);\n\
+            case TYPE_UINT32ARRAY:\n\
+                return new Uint32Array(buffer);\n\
+            case TYPE_FLOAT32ARRAY:\n\
+                return new Float32Array(buffer);\n\
+            case TYPE_FLOAT64ARRAY:\n\
+                return new Float64Array(buffer);\n\
+            default:\n\
+                throw new Error('Unkown type: ' + type);\n\
+        }\n\
+    }\n\
+\n\
+    // Converts a buffer to a string to store, serialized, in the backend\n\
+    // storage library.\n\
+    function _bufferToString(buffer) {\n\
+        var str = '';\n\
+        var uint16Array = new Uint16Array(buffer);\n\
+\n\
+        try {\n\
+            str = String.fromCharCode.apply(null, uint16Array);\n\
+        } catch (e) {\n\
+            // This is a fallback implementation in case the first one does\n\
+            // not work. This is required to get the phantomjs passing...\n\
+            for (var i = 0; i < uint16Array.length; i++) {\n\
+                str += String.fromCharCode(uint16Array[i]);\n\
+            }\n\
+        }\n\
+\n\
+        return str;\n\
+    }\n\
+\n\
+    // Serialize a value, afterwards executing a callback (which usually\n\
+    // instructs the `setItem()` callback/promise to be executed). This is how\n\
+    // we store binary data with localStorage.\n\
+    function _serialize(value, callback) {\n\
+        var valueString = '';\n\
+        if (value) {\n\
+            valueString = value.toString();\n\
+        }\n\
+\n\
+        // Cannot use `value instanceof ArrayBuffer` or such here, as these\n\
+        // checks fail when running the tests using casper.js...\n\
+        //\n\
+        // TODO: See why those tests fail and use a better solution.\n\
+        if (value && (value.toString() === '[object ArrayBuffer]' ||\n\
+                      value.buffer && value.buffer.toString() === '[object ArrayBuffer]')) {\n\
+            // Convert binary arrays to a string and prefix the string with\n\
+            // a special marker.\n\
+            var buffer;\n\
+            var marker = SERIALIZED_MARKER;\n\
+\n\
+            if (value instanceof ArrayBuffer) {\n\
+                buffer = value;\n\
+                marker += TYPE_ARRAYBUFFER;\n\
+            } else {\n\
+                buffer = value.buffer;\n\
+\n\
+                if (valueString === '[object Int8Array]') {\n\
+                    marker += TYPE_INT8ARRAY;\n\
+                } else if (valueString === '[object Uint8Array]') {\n\
+                    marker += TYPE_UINT8ARRAY;\n\
+                } else if (valueString === '[object Uint8ClampedArray]') {\n\
+                    marker += TYPE_UINT8CLAMPEDARRAY;\n\
+                } else if (valueString === '[object Int16Array]') {\n\
+                    marker += TYPE_INT16ARRAY;\n\
+                } else if (valueString === '[object Uint16Array]') {\n\
+                    marker += TYPE_UINT16ARRAY;\n\
+                } else if (valueString === '[object Int32Array]') {\n\
+                    marker += TYPE_INT32ARRAY;\n\
+                } else if (valueString === '[object Uint32Array]') {\n\
+                    marker += TYPE_UINT32ARRAY;\n\
+                } else if (valueString === '[object Float32Array]') {\n\
+                    marker += TYPE_FLOAT32ARRAY;\n\
+                } else if (valueString === '[object Float64Array]') {\n\
+                    marker += TYPE_FLOAT64ARRAY;\n\
+                } else {\n\
+                    callback(new Error(\"Failed to get type for BinaryArray\"));\n\
+                }\n\
+            }\n\
+\n\
+            var str = _bufferToString(buffer);\n\
+\n\
+            callback(null, marker + str);\n\
+        } else if (valueString === \"[object Blob]\") {\n\
+            // Conver the blob to a binaryArray and then to a string.\n\
+            var fileReader = new FileReader();\n\
+\n\
+            fileReader.onload = function() {\n\
+                var str = _bufferToString(this.result);\n\
+\n\
+                callback(null, SERIALIZED_MARKER + TYPE_BLOB + str);\n\
+            };\n\
+\n\
+            fileReader.readAsArrayBuffer(value);\n\
+        } else {\n\
+            try {\n\
+                callback(null, JSON.stringify(value));\n\
+            } catch (e) {\n\
+                if (window.console && window.console.error) {\n\
+                    window.console.error(\"Couldn't convert value into a JSON string: \", value);\n\
+                }\n\
+                callback(e);\n\
+            }\n\
+        }\n\
+    }\n\
+\n\
+    // Set a key's value and run an optional callback once the value is set.\n\
+    // Unlike Gaia's implementation, the callback function is passed the value,\n\
+    // in case you want to operate on that value only after you're sure it\n\
+    // saved, or something like that.\n\
+    function setItem(key, value, callback) {\n\
+        var _this = this;\n\
+        return new Promise(function(resolve, reject) {\n\
+            _this.ready().then(function() {\n\
+                // Convert undefined values to null.\n\
+                // https://github.com/mozilla/localForage/pull/42\n\
+                if (value === undefined) {\n\
+                    value = null;\n\
+                }\n\
+\n\
+                // Save the original value to pass to the callback.\n\
+                var originalValue = value;\n\
+\n\
+                _serialize(value, function setSerialized(error, value) {\n\
+                    if (error) {\n\
+                        reject(error);\n\
+                    } else {\n\
+                        localStorage.setItem(keyPrefix + key, value);\n\
+\n\
+                        if (callback) {\n\
+                            callback(originalValue);\n\
+                        }\n\
+\n\
+                        resolve(originalValue);\n\
+                    }\n\
+                });\n\
+            });\n\
+        });\n\
+    }\n\
+\n\
+    var localStorageWrapper = {\n\
+        _driver: 'localStorageWrapper',\n\
+        _initStorage: _initStorage,\n\
+        // Default API, from Gaia/localStorage.\n\
+        getItem: getItem,\n\
+        setItem: setItem,\n\
+        removeItem: removeItem,\n\
+        clear: clear,\n\
+        length: length,\n\
+        key: key\n\
+    };\n\
+\n\
+    if (typeof define === 'function' && define.amd) {\n\
+        define('localStorageWrapper', function() {\n\
+            return localStorageWrapper;\n\
+        });\n\
+    } else if (typeof module !== 'undefined' && module.exports) {\n\
+        module.exports = localStorageWrapper;\n\
+    } else {\n\
+        this.localStorageWrapper = localStorageWrapper;\n\
+    }\n\
+}).call(this);\n\
+//@ sourceURL=pgherveou-localforage/src/drivers/localstorage.js"
+));
+require.register("pgherveou-localforage/src/drivers/websql.js", Function("exports, require, module",
+"/*\n\
+ * Includes code from:\n\
  *\n\
- * @param {String} [prefix] prefix added to localstorage keys\n\
- * @api private\n\
- */\n\
-\n\
-function Store(_) {\n\
-  if (!(this instanceof Store)) return new Store(_);\n\
-  this._ = _ || '';\n\
-}\n\
-\n\
-/**\n\
- * expose new Store instance\n\
- */\n\
-\n\
-module.exports = new Store();\n\
-\n\
-/**\n\
- * create a new store\n\
- * @param {String} prefix\n\
+ * base64-arraybuffer\n\
+ * https://github.com/niklasvh/base64-arraybuffer\n\
  *\n\
- * @api public\n\
+ * Copyright (c) 2012 Niklas von Hertzen\n\
+ * Licensed under the MIT license.\n\
  */\n\
+(function() {\n\
+    'use strict';\n\
 \n\
-Store.prototype.prefix = function(prefix) {\n\
-  return new Store(prefix);\n\
-};\n\
+    // Sadly, the best way to save binary data in WebSQL is Base64 serializing\n\
+    // it, so this is how we store it to prevent very strange errors with less\n\
+    // verbose ways of binary <-> string data storage.\n\
+    var BASE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';\n\
 \n\
-// alias prefix with ns\n\
-Store.prototype.ns = Store.prototype.prefix;\n\
+    var Promise = this.Promise;\n\
+    var openDatabase = this.openDatabase;\n\
+    var db = null;\n\
+    var dbInfo = {\n\
+        description: '',\n\
+        name: 'localforage',\n\
+        // Default DB size is _JUST UNDER_ 5MB, as it's the highest size we can use\n\
+        // without a prompt.\n\
+        size: 4980736,\n\
+        storeName: 'keyvaluepairs',\n\
+        version: '1.0'\n\
+    };\n\
 \n\
-/**\n\
- * set a key, call JSON.stringify to serialize value\n\
- * @param {String} key\n\
- * @param {Object} val\n\
- *\n\
- * @return {Number} return val.length or 0 if anything has been thrown\n\
- *\n\
- * @api public\n\
- */\n\
+    var SERIALIZED_MARKER = '__lfsc__:';\n\
+    var SERIALIZED_MARKER_LENGTH = SERIALIZED_MARKER.length;\n\
 \n\
-Store.prototype.set = function(key, val) {\n\
-  var data;\n\
-  try {\n\
-    data = JSON.stringify(val || null);\n\
-    ls.setItem(this._ + key, data);\n\
-    return data.length;\n\
-  } catch(e) {\n\
-    return 0;\n\
-  }\n\
-};\n\
+    // OMG the serializations!\n\
+    var TYPE_ARRAYBUFFER = 'arbf';\n\
+    var TYPE_BLOB = 'blob';\n\
+    var TYPE_INT8ARRAY = 'si08';\n\
+    var TYPE_UINT8ARRAY = 'ui08';\n\
+    var TYPE_UINT8CLAMPEDARRAY = 'uic8';\n\
+    var TYPE_INT16ARRAY = 'si16';\n\
+    var TYPE_INT32ARRAY = 'si32';\n\
+    var TYPE_UINT16ARRAY = 'ur16';\n\
+    var TYPE_UINT32ARRAY = 'ui32';\n\
+    var TYPE_FLOAT32ARRAY = 'fl32';\n\
+    var TYPE_FLOAT64ARRAY = 'fl64';\n\
+    var TYPE_SERIALIZED_MARKER_LENGTH = SERIALIZED_MARKER_LENGTH + TYPE_ARRAYBUFFER.length;\n\
 \n\
-/**\n\
- * set a key, value without serializing\n\
- * @param {String} key\n\
- * @param {String} val\n\
- *\n\
- * @return {[Error]} return null or Error if anything has been thrown\n\
- * @api public\n\
- */\n\
+    // If WebSQL methods aren't available, we can stop now.\n\
+    if (!openDatabase) {\n\
+        return;\n\
+    }\n\
 \n\
-Store.prototype.setItem = function(key, val) {\n\
-  if (!val) return;\n\
-  try {\n\
-    ls.setItem(this._ + key, val);\n\
-    return null;\n\
-  } catch(e) {\n\
-    return e;\n\
-  }\n\
-};\n\
+    // Open the WebSQL database (automatically creates one if one didn't\n\
+    // previously exist), using any options set in window.localForageConfig.\n\
+    function _initStorage(options) {\n\
+        if (options) {\n\
+            for (var i in dbInfo) {\n\
+                if (options[i] !== undefined) {\n\
+                    dbInfo[i] = typeof(options[i]) !== 'string' ? options[i].toString() : options[i];\n\
+                }\n\
+            }\n\
+        }\n\
 \n\
-/**\n\
- * get a key call JSON.parse to deserialize value\n\
- * @param  {String} [key]\n\
- * @return {Object}\n\
- *\n\
- * @api public\n\
- */\n\
+        return new Promise(function(resolve) {\n\
+            // Open the database; the openDatabase API will automatically\n\
+            // create it for us if it doesn't exist.\n\
+            db = openDatabase(dbInfo.name, dbInfo.version, dbInfo.description,\n\
+                              dbInfo.size);\n\
 \n\
-Store.prototype.get = function(key) {\n\
-  try {\n\
-    return JSON.parse(ls.getItem(this._ + (key || '')));\n\
-  } catch (_error) {\n\
-    return null;\n\
-  }\n\
-};\n\
+            // Create our key/value table if it doesn't exist.\n\
+            db.transaction(function (t) {\n\
+                t.executeSql('CREATE TABLE IF NOT EXISTS ' + dbInfo.storeName + ' (id INTEGER PRIMARY KEY, key unique, value)', [], function() {\n\
+                    resolve();\n\
+                }, null);\n\
+            });\n\
+        });\n\
+    }\n\
 \n\
-/**\n\
- * get Item as string without deserializing\n\
- * @param  {String} [key]\n\
- * @return {Object}\n\
- *\n\
- * @api public\n\
- */\n\
+    function getItem(key, callback) {\n\
+        var _this = this;\n\
+        return new Promise(function(resolve) {\n\
+            _this.ready().then(function() {\n\
+                db.transaction(function (t) {\n\
+                    t.executeSql('SELECT * FROM ' + dbInfo.storeName + ' WHERE key = ? LIMIT 1', [key], function (t, results) {\n\
+                        var result = results.rows.length ? results.rows.item(0).value : null;\n\
 \n\
-Store.prototype.getItem = function(key) {\n\
-  return ls.getItem(this._ + (key || ''));\n\
-};\n\
+                        // Check to see if this is serialized content we need to\n\
+                        // unpack.\n\
+                        if (result) {\n\
+                            result = _deserialize(result);\n\
+                        }\n\
 \n\
-/**\n\
- * save the prefix value\n\
- * shortcut for store.set('', val)\n\
- *\n\
- * @param  {Object} val\n\
- * @api public\n\
- */\n\
+                        if (callback) {\n\
+                            callback(result);\n\
+                        }\n\
 \n\
-Store.prototype.save = function(val) {\n\
-  return this.set('', val);\n\
-};\n\
+                        resolve(result);\n\
+                    }, null);\n\
+                });\n\
+            });\n\
+        });\n\
+    }\n\
 \n\
-/**\n\
- * unset a key\n\
- * @param  {String} key\n\
- *\n\
- * @api public\n\
- */\n\
+    function setItem(key, value, callback) {\n\
+        var _this = this;\n\
+        return new Promise(function(resolve, reject) {\n\
+            _this.ready().then(function() {\n\
+                // The localStorage API doesn't return undefined values in an\n\
+                // \"expected\" way, so undefined is always cast to null in all\n\
+                // drivers. See: https://github.com/mozilla/localForage/pull/42\n\
+                if (value === undefined) {\n\
+                    value = null;\n\
+                }\n\
 \n\
-Store.prototype.unset = function(key) {\n\
-  ls.removeItem(this._ + key);\n\
-};\n\
+                // Save the original value to pass to the callback.\n\
+                var originalValue = value;\n\
 \n\
-// alias unset with del\n\
-Store.prototype.del = Store.prototype.unset;\n\
+                _serialize(value, function setItemserializeValueCallback(error, value) {\n\
+                    if (error) {\n\
+                        reject(error);\n\
+                    } else {\n\
+                        db.transaction(function (t) {\n\
+                            t.executeSql('INSERT OR REPLACE INTO ' + dbInfo.storeName + ' (key, value) VALUES (?, ?)', [key, value], function() {\n\
+                                if (callback) {\n\
+                                    callback(originalValue);\n\
+                                }\n\
 \n\
-/**\n\
- * clear all keys matching prefix\n\
- *\n\
- * @api public\n\
- */\n\
+                                resolve(originalValue);\n\
+                            }, null);\n\
+                        });\n\
+                    }\n\
+                });\n\
+            });\n\
+        });\n\
+    }\n\
 \n\
-Store.prototype.clear = function() {\n\
-  var prefix = this._,\n\
-      keys = Object.keys(ls).filter(function(key) {\n\
-    return key.indexOf(prefix) === 0;\n\
-  });\n\
-  keys.forEach(function(key) {\n\
-    ls.removeItem(key);\n\
-  });\n\
-};\n\
+    function removeItem(key, callback) {\n\
+        var _this = this;\n\
+        return new Promise(function(resolve) {\n\
+            _this.ready().then(function() {\n\
+                db.transaction(function (t) {\n\
+                    t.executeSql('DELETE FROM ' + dbInfo.storeName + ' WHERE key = ?', [key], function() {\n\
+                        if (callback) {\n\
+                            callback();\n\
+                        }\n\
 \n\
-// alias clear with reset\n\
+                        resolve();\n\
+                    }, null);\n\
+                });\n\
+            });\n\
+        });\n\
+    }\n\
 \n\
-Store.prototype.reset = Store.prototype.clear;\n\
+    // Deletes every item in the table.\n\
+    // TODO: Find out if this resets the AUTO_INCREMENT number.\n\
+    function clear(callback) {\n\
+        var _this = this;\n\
+        return new Promise(function(resolve) {\n\
+            _this.ready().then(function() {\n\
+                db.transaction(function (t) {\n\
+                    t.executeSql('DELETE FROM ' + dbInfo.storeName, [], function() {\n\
+                        if (callback) {\n\
+                            callback();\n\
+                        }\n\
 \n\
-/**\n\
- * clear all values\n\
- *\n\
- * @api public\n\
- */\n\
+                        resolve();\n\
+                    }, null);\n\
+                });\n\
+            });\n\
+        });\n\
+    }\n\
 \n\
-Store.prototype.clearAll = function() {\n\
-  ls.clear();\n\
-};\n\
-//@ sourceURL=pgherveou-store/index.js"
+    // Does a simple `COUNT(key)` to get the number of items stored in\n\
+    // localForage.\n\
+    function length(callback) {\n\
+        var _this = this;\n\
+        return new Promise(function(resolve) {\n\
+            _this.ready().then(function() {\n\
+                db.transaction(function (t) {\n\
+                    // Ahhh, SQL makes this one soooooo easy.\n\
+                    t.executeSql('SELECT COUNT(key) as c FROM ' + dbInfo.storeName, [], function (t, results) {\n\
+                        var result = results.rows.item(0).c;\n\
+\n\
+                        if (callback) {\n\
+                            callback(result);\n\
+                        }\n\
+\n\
+                        resolve(result);\n\
+                    }, null);\n\
+                });\n\
+            });\n\
+        });\n\
+    }\n\
+\n\
+    // Return the key located at key index X; essentially gets the key from a\n\
+    // `WHERE id = ?`. This is the most efficient way I can think to implement\n\
+    // this rarely-used (in my experience) part of the API, but it can seem\n\
+    // inconsistent, because we do `INSERT OR REPLACE INTO` on `setItem()`, so\n\
+    // the ID of each key will change every time it's updated. Perhaps a stored\n\
+    // procedure for the `setItem()` SQL would solve this problem?\n\
+    // TODO: Don't change ID on `setItem()`.\n\
+    function key(n, callback) {\n\
+        var _this = this;\n\
+        return new Promise(function(resolve) {\n\
+            _this.ready().then(function() {\n\
+                db.transaction(function (t) {\n\
+                    t.executeSql('SELECT key FROM ' + dbInfo.storeName + ' WHERE id = ? LIMIT 1', [n + 1], function (t, results) {\n\
+                        var result = results.rows.length ? results.rows.item(0).key : null;\n\
+\n\
+                        if (callback) {\n\
+                            callback(result);\n\
+                        }\n\
+\n\
+                        resolve(result);\n\
+                    }, null);\n\
+                });\n\
+            });\n\
+        });\n\
+    }\n\
+\n\
+    // Converts a buffer to a string to store, serialized, in the backend\n\
+    // storage library.\n\
+    function _bufferToString(buffer) {\n\
+        // base64-arraybuffer\n\
+        var bytes = new Uint8Array(buffer);\n\
+        var i;\n\
+        var base64String = '';\n\
+\n\
+        for (i = 0; i < bytes.length; i += 3) {\n\
+            /*jslint bitwise: true */\n\
+            base64String += BASE_CHARS[bytes[i] >> 2];\n\
+            base64String += BASE_CHARS[((bytes[i] & 3) << 4) | (bytes[i + 1] >> 4)];\n\
+            base64String += BASE_CHARS[((bytes[i + 1] & 15) << 2) | (bytes[i + 2] >> 6)];\n\
+            base64String += BASE_CHARS[bytes[i + 2] & 63];\n\
+        }\n\
+\n\
+        if ((bytes.length % 3) === 2) {\n\
+            base64String = base64String.substring(0, base64String.length - 1) + \"=\";\n\
+        } else if (bytes.length % 3 === 1) {\n\
+            base64String = base64String.substring(0, base64String.length - 2) + \"==\";\n\
+        }\n\
+\n\
+        return base64String;\n\
+    }\n\
+\n\
+    // Deserialize data we've inserted into a value column/field. We place\n\
+    // special markers into our strings to mark them as encoded; this isn't\n\
+    // as nice as a meta field, but it's the only sane thing we can do whilst\n\
+    // keeping localStorage support intact.\n\
+    //\n\
+    // Oftentimes this will just deserialize JSON content, but if we have a\n\
+    // special marker (SERIALIZED_MARKER, defined above), we will extract\n\
+    // some kind of arraybuffer/binary data/typed array out of the string.\n\
+    function _deserialize(value) {\n\
+        // If we haven't marked this string as being specially serialized (i.e.\n\
+        // something other than serialized JSON), we can just return it and be\n\
+        // done with it.\n\
+        if (value.substring(0, SERIALIZED_MARKER_LENGTH) !== SERIALIZED_MARKER) {\n\
+            return JSON.parse(value);\n\
+        }\n\
+\n\
+        // The following code deals with deserializing some kind of Blob or\n\
+        // TypedArray. First we separate out the type of data we're dealing\n\
+        // with from the data itself.\n\
+        var serializedString = value.substring(TYPE_SERIALIZED_MARKER_LENGTH);\n\
+        var type = value.substring(SERIALIZED_MARKER_LENGTH, TYPE_SERIALIZED_MARKER_LENGTH);\n\
+\n\
+        // Fill the string into a ArrayBuffer.\n\
+        var bufferLength = serializedString.length * 0.75;\n\
+        var len = serializedString.length;\n\
+        var i;\n\
+        var p = 0;\n\
+        var encoded1, encoded2, encoded3, encoded4;\n\
+\n\
+        if (serializedString[serializedString.length - 1] === \"=\") {\n\
+            bufferLength--;\n\
+            if (serializedString[serializedString.length - 2] === \"=\") {\n\
+                bufferLength--;\n\
+            }\n\
+        }\n\
+\n\
+        var buffer = new ArrayBuffer(bufferLength);\n\
+        var bytes = new Uint8Array(buffer);\n\
+\n\
+        for (i = 0; i < len; i+=4) {\n\
+            encoded1 = BASE_CHARS.indexOf(serializedString[i]);\n\
+            encoded2 = BASE_CHARS.indexOf(serializedString[i+1]);\n\
+            encoded3 = BASE_CHARS.indexOf(serializedString[i+2]);\n\
+            encoded4 = BASE_CHARS.indexOf(serializedString[i+3]);\n\
+\n\
+            /*jslint bitwise: true */\n\
+            bytes[p++] = (encoded1 << 2) | (encoded2 >> 4);\n\
+            bytes[p++] = ((encoded2 & 15) << 4) | (encoded3 >> 2);\n\
+            bytes[p++] = ((encoded3 & 3) << 6) | (encoded4 & 63);\n\
+        }\n\
+\n\
+        // Return the right type based on the code/type set during\n\
+        // serialization.\n\
+        switch (type) {\n\
+            case TYPE_ARRAYBUFFER:\n\
+                return buffer;\n\
+            case TYPE_BLOB:\n\
+                return new Blob([buffer]);\n\
+            case TYPE_INT8ARRAY:\n\
+                return new Int8Array(buffer);\n\
+            case TYPE_UINT8ARRAY:\n\
+                return new Uint8Array(buffer);\n\
+            case TYPE_UINT8CLAMPEDARRAY:\n\
+                return new Uint8ClampedArray(buffer);\n\
+            case TYPE_INT16ARRAY:\n\
+                return new Int16Array(buffer);\n\
+            case TYPE_UINT16ARRAY:\n\
+                return new Uint16Array(buffer);\n\
+            case TYPE_INT32ARRAY:\n\
+                return new Int32Array(buffer);\n\
+            case TYPE_UINT32ARRAY:\n\
+                return new Uint32Array(buffer);\n\
+            case TYPE_FLOAT32ARRAY:\n\
+                return new Float32Array(buffer);\n\
+            case TYPE_FLOAT64ARRAY:\n\
+                return new Float64Array(buffer);\n\
+            default:\n\
+                throw new Error('Unkown type: ' + type);\n\
+        }\n\
+    }\n\
+\n\
+    // Serialize a value, afterwards executing a callback (which usually\n\
+    // instructs the `setItem()` callback/promise to be executed). This is how\n\
+    // we store binary data with localStorage.\n\
+    function _serialize(value, callback) {\n\
+        var valueString = '';\n\
+        if (value) {\n\
+            valueString = value.toString();\n\
+        }\n\
+\n\
+        // Cannot use `value instanceof ArrayBuffer` or such here, as these\n\
+        // checks fail when running the tests using casper.js...\n\
+        //\n\
+        // TODO: See why those tests fail and use a better solution.\n\
+        if (value && (value.toString() === '[object ArrayBuffer]' ||\n\
+                      value.buffer && value.buffer.toString() === '[object ArrayBuffer]')) {\n\
+            // Convert binary arrays to a string and prefix the string with\n\
+            // a special marker.\n\
+            var buffer;\n\
+            var marker = SERIALIZED_MARKER;\n\
+\n\
+            if (value instanceof ArrayBuffer) {\n\
+                buffer = value;\n\
+                marker += TYPE_ARRAYBUFFER;\n\
+            } else {\n\
+                buffer = value.buffer;\n\
+\n\
+                if (valueString === '[object Int8Array]') {\n\
+                    marker += TYPE_INT8ARRAY;\n\
+                } else if (valueString === '[object Uint8Array]') {\n\
+                    marker += TYPE_UINT8ARRAY;\n\
+                } else if (valueString === '[object Uint8ClampedArray]') {\n\
+                    marker += TYPE_UINT8CLAMPEDARRAY;\n\
+                } else if (valueString === '[object Int16Array]') {\n\
+                    marker += TYPE_INT16ARRAY;\n\
+                } else if (valueString === '[object Uint16Array]') {\n\
+                    marker += TYPE_UINT16ARRAY;\n\
+                } else if (valueString === '[object Int32Array]') {\n\
+                    marker += TYPE_INT32ARRAY;\n\
+                } else if (valueString === '[object Uint32Array]') {\n\
+                    marker += TYPE_UINT32ARRAY;\n\
+                } else if (valueString === '[object Float32Array]') {\n\
+                    marker += TYPE_FLOAT32ARRAY;\n\
+                } else if (valueString === '[object Float64Array]') {\n\
+                    marker += TYPE_FLOAT64ARRAY;\n\
+                } else {\n\
+                    callback(new Error(\"Failed to get type for BinaryArray\"));\n\
+                }\n\
+            }\n\
+\n\
+            var str = _bufferToString(buffer);\n\
+\n\
+            callback(null, marker + str);\n\
+        } else if (valueString === \"[object Blob]\") {\n\
+            // Conver the blob to a binaryArray and then to a string.\n\
+            var fileReader = new FileReader();\n\
+\n\
+            fileReader.onload = function() {\n\
+                var str = _bufferToString(this.result);\n\
+\n\
+                callback(null, SERIALIZED_MARKER + TYPE_BLOB + str);\n\
+            };\n\
+\n\
+            fileReader.readAsArrayBuffer(value);\n\
+        } else {\n\
+            try {\n\
+                callback(null, JSON.stringify(value));\n\
+            } catch (e) {\n\
+                if (window.console && window.console.error) {\n\
+                    window.console.error(\"Couldn't convert value into a JSON string: \", value);\n\
+                }\n\
+                callback(e);\n\
+            }\n\
+        }\n\
+    }\n\
+\n\
+    var webSQLStorage = {\n\
+        _driver: 'webSQLStorage',\n\
+        _initStorage: _initStorage,\n\
+        getItem: getItem,\n\
+        setItem: setItem,\n\
+        removeItem: removeItem,\n\
+        clear: clear,\n\
+        length: length,\n\
+        key: key\n\
+    };\n\
+\n\
+    if (typeof define === 'function' && define.amd) {\n\
+        define('webSQLStorage', function() {\n\
+            return webSQLStorage;\n\
+        });\n\
+    } else if (typeof module !== 'undefined' && module.exports) {\n\
+        module.exports = webSQLStorage;\n\
+    } else {\n\
+        this.webSQLStorage = webSQLStorage;\n\
+    }\n\
+}).call(this);\n\
+//@ sourceURL=pgherveou-localforage/src/drivers/websql.js"
 ));
 require.register("chaijs-assertion-error/index.js", Function("exports, require, module",
 "/*!\n\
@@ -900,7 +1930,7 @@ require.register("chaijs-chai/index.js", Function("exports, require, module",
 require.register("chaijs-chai/lib/chai.js", Function("exports, require, module",
 "/*!\n\
  * chai\n\
- * Copyright(c) 2011-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2011-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
 \n\
@@ -911,7 +1941,7 @@ var used = []\n\
  * Chai version\n\
  */\n\
 \n\
-exports.version = '1.8.1';\n\
+exports.version = '1.9.1';\n\
 \n\
 /*!\n\
  * Assertion Error\n\
@@ -943,6 +1973,13 @@ exports.use = function (fn) {\n\
 \n\
   return this;\n\
 };\n\
+\n\
+/*!\n\
+ * Configuration\n\
+ */\n\
+\n\
+var config = require('./chai/config');\n\
+exports.config = config;\n\
 \n\
 /*!\n\
  * Primary `Assertion` prototype\n\
@@ -984,9 +2021,11 @@ require.register("chaijs-chai/lib/chai/assertion.js", Function("exports, require
 "/*!\n\
  * chai\n\
  * http://chaijs.com\n\
- * Copyright(c) 2011-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2011-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
+\n\
+var config = require('./config');\n\
 \n\
 module.exports = function (_chai, util) {\n\
   /*!\n\
@@ -1016,33 +2055,27 @@ module.exports = function (_chai, util) {\n\
     flag(this, 'message', msg);\n\
   }\n\
 \n\
-  /*!\n\
-    * ### Assertion.includeStack\n\
-    *\n\
-    * User configurable property, influences whether stack trace\n\
-    * is included in Assertion error message. Default of false\n\
-    * suppresses stack trace in the error message\n\
-    *\n\
-    *     Assertion.includeStack = true;  // enable stack on error\n\
-    *\n\
-    * @api public\n\
-    */\n\
+  Object.defineProperty(Assertion, 'includeStack', {\n\
+    get: function() {\n\
+      console.warn('Assertion.includeStack is deprecated, use chai.config.includeStack instead.');\n\
+      return config.includeStack;\n\
+    },\n\
+    set: function(value) {\n\
+      console.warn('Assertion.includeStack is deprecated, use chai.config.includeStack instead.');\n\
+      config.includeStack = value;\n\
+    }\n\
+  });\n\
 \n\
-  Assertion.includeStack = false;\n\
-\n\
-  /*!\n\
-   * ### Assertion.showDiff\n\
-   *\n\
-   * User configurable property, influences whether or not\n\
-   * the `showDiff` flag should be included in the thrown\n\
-   * AssertionErrors. `false` will always be `false`; `true`\n\
-   * will be true when the assertion has requested a diff\n\
-   * be shown.\n\
-   *\n\
-   * @api public\n\
-   */\n\
-\n\
-  Assertion.showDiff = true;\n\
+  Object.defineProperty(Assertion, 'showDiff', {\n\
+    get: function() {\n\
+      console.warn('Assertion.showDiff is deprecated, use chai.config.showDiff instead.');\n\
+      return config.showDiff;\n\
+    },\n\
+    set: function(value) {\n\
+      console.warn('Assertion.showDiff is deprecated, use chai.config.showDiff instead.');\n\
+      config.showDiff = value;\n\
+    }\n\
+  });\n\
 \n\
   Assertion.addProperty = function (name, fn) {\n\
     util.addProperty(this.prototype, name, fn);\n\
@@ -1064,6 +2097,10 @@ module.exports = function (_chai, util) {\n\
     util.overwriteMethod(this.prototype, name, fn);\n\
   };\n\
 \n\
+  Assertion.overwriteChainableMethod = function (name, fn, chainingBehavior) {\n\
+    util.overwriteChainableMethod(this.prototype, name, fn, chainingBehavior);\n\
+  };\n\
+\n\
   /*!\n\
    * ### .assert(expression, message, negateMessage, expected, actual)\n\
    *\n\
@@ -1081,7 +2118,7 @@ module.exports = function (_chai, util) {\n\
   Assertion.prototype.assert = function (expr, msg, negateMsg, expected, _actual, showDiff) {\n\
     var ok = util.test(this, arguments);\n\
     if (true !== showDiff) showDiff = false;\n\
-    if (true !== Assertion.showDiff) showDiff = false;\n\
+    if (true !== config.showDiff) showDiff = false;\n\
 \n\
     if (!ok) {\n\
       var msg = util.getMessage(this, arguments)\n\
@@ -1090,7 +2127,7 @@ module.exports = function (_chai, util) {\n\
           actual: actual\n\
         , expected: expected\n\
         , showDiff: showDiff\n\
-      }, (Assertion.includeStack) ? this.assert : flag(this, 'ssfi'));\n\
+      }, (config.includeStack) ? this.assert : flag(this, 'ssfi'));\n\
     }\n\
   };\n\
 \n\
@@ -1113,11 +2150,64 @@ module.exports = function (_chai, util) {\n\
 };\n\
 //@ sourceURL=chaijs-chai/lib/chai/assertion.js"
 ));
+require.register("chaijs-chai/lib/chai/config.js", Function("exports, require, module",
+"module.exports = {\n\
+\n\
+  /**\n\
+   * ### config.includeStack\n\
+   *\n\
+   * User configurable property, influences whether stack trace\n\
+   * is included in Assertion error message. Default of false\n\
+   * suppresses stack trace in the error message.\n\
+   *\n\
+   *     chai.config.includeStack = true;  // enable stack on error\n\
+   *\n\
+   * @param {Boolean}\n\
+   * @api public\n\
+   */\n\
+\n\
+   includeStack: false,\n\
+\n\
+  /**\n\
+   * ### config.showDiff\n\
+   *\n\
+   * User configurable property, influences whether or not\n\
+   * the `showDiff` flag should be included in the thrown\n\
+   * AssertionErrors. `false` will always be `false`; `true`\n\
+   * will be true when the assertion has requested a diff\n\
+   * be shown.\n\
+   *\n\
+   * @param {Boolean}\n\
+   * @api public\n\
+   */\n\
+\n\
+  showDiff: true,\n\
+\n\
+  /**\n\
+   * ### config.truncateThreshold\n\
+   *\n\
+   * User configurable property, sets length threshold for actual and\n\
+   * expected values in assertion errors. If this threshold is exceeded,\n\
+   * the value is truncated.\n\
+   *\n\
+   * Set it to zero if you want to disable truncating altogether.\n\
+   *\n\
+   *     chai.config.truncateThreshold = 0;  // disable truncating\n\
+   *\n\
+   * @param {Number}\n\
+   * @api public\n\
+   */\n\
+\n\
+  truncateThreshold: 40\n\
+\n\
+};\n\
+//@ sourceURL=chaijs-chai/lib/chai/config.js"
+));
 require.register("chaijs-chai/lib/chai/core/assertions.js", Function("exports, require, module",
 "/*!\n\
  * chai\n\
  * http://chaijs.com\n\
- * Copyright(c) 2011-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2011-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
 \n\
@@ -1129,9 +2219,9 @@ module.exports = function (chai, _) {\n\
   /**\n\
    * ### Language Chains\n\
    *\n\
-   * The following are provide as chainable getters to\n\
+   * The following are provided as chainable getters to\n\
    * improve the readability of your assertions. They\n\
-   * do not provide an testing capability unless they\n\
+   * do not provide testing capabilities unless they\n\
    * have been overwritten by a plugin.\n\
    *\n\
    * **Chains**\n\
@@ -1142,6 +2232,7 @@ module.exports = function (chai, _) {\n\
    * - is\n\
    * - that\n\
    * - and\n\
+   * - has\n\
    * - have\n\
    * - with\n\
    * - at\n\
@@ -1153,7 +2244,7 @@ module.exports = function (chai, _) {\n\
    */\n\
 \n\
   [ 'to', 'be', 'been'\n\
-  , 'is', 'and', 'have'\n\
+  , 'is', 'and', 'has', 'have'\n\
   , 'with', 'that', 'at'\n\
   , 'of', 'same' ].forEach(function (chain) {\n\
     Assertion.addProperty(chain, function () {\n\
@@ -1261,9 +2352,28 @@ module.exports = function (chai, _) {\n\
 \n\
   function include (val, msg) {\n\
     if (msg) flag(this, 'message', msg);\n\
-    var obj = flag(this, 'object')\n\
+    var obj = flag(this, 'object');\n\
+    var expected = false;\n\
+    if (_.type(obj) === 'array' && _.type(val) === 'object') {\n\
+      for (var i in obj) {\n\
+        if (_.eql(obj[i], val)) {\n\
+          expected = true;\n\
+          break;\n\
+        }\n\
+      }\n\
+    } else if (_.type(val) === 'object') {\n\
+      if (!flag(this, 'negate')) {\n\
+        for (var k in val) new Assertion(obj).property(k, val[k]);\n\
+        return;\n\
+      }\n\
+      var subset = {}\n\
+      for (var k in val) subset[k] = obj[k]\n\
+      expected = _.eql(subset, val);\n\
+    } else {\n\
+      expected = obj && ~obj.indexOf(val)\n\
+    }\n\
     this.assert(\n\
-        ~obj.indexOf(val)\n\
+        expected\n\
       , 'expected #{this} to include ' + _.inspect(val)\n\
       , 'expected #{this} to not include ' + _.inspect(val));\n\
   }\n\
@@ -2118,6 +3228,7 @@ module.exports = function (chai, _) {\n\
    * @param {String|RegExp} expected error message\n\
    * @param {String} message _optional_\n\
    * @see https://developer.mozilla.org/en/JavaScript/Reference/Global_Objects/Error#Error_types\n\
+   * @returns error for chaining (null if no error)\n\
    * @api public\n\
    */\n\
 \n\
@@ -2142,7 +3253,10 @@ module.exports = function (chai, _) {\n\
       constructor = null;\n\
       errMsg = null;\n\
     } else if (typeof constructor === 'function') {\n\
-      name = (new constructor()).name;\n\
+      name = constructor.prototype.name || constructor.name;\n\
+      if (name === 'Error' && constructor !== Error) {\n\
+        name = (new constructor()).name;\n\
+      }\n\
     } else {\n\
       constructor = null;\n\
     }\n\
@@ -2160,8 +3274,10 @@ module.exports = function (chai, _) {\n\
           , (err instanceof Error ? err.toString() : err)\n\
         );\n\
 \n\
+        flag(this, 'object', err);\n\
         return this;\n\
       }\n\
+\n\
       // next, check constructor\n\
       if (constructor) {\n\
         this.assert(\n\
@@ -2172,8 +3288,12 @@ module.exports = function (chai, _) {\n\
           , (err instanceof Error ? err.toString() : err)\n\
         );\n\
 \n\
-        if (!errMsg) return this;\n\
+        if (!errMsg) {\n\
+          flag(this, 'object', err);\n\
+          return this;\n\
+        }\n\
       }\n\
+\n\
       // next, check message\n\
       var message = 'object' === _.type(err) && \"message\" in err\n\
         ? err.message\n\
@@ -2188,6 +3308,7 @@ module.exports = function (chai, _) {\n\
           , message\n\
         );\n\
 \n\
+        flag(this, 'object', err);\n\
         return this;\n\
       } else if ((message != null) && errMsg && 'string' === typeof errMsg) {\n\
         this.assert(\n\
@@ -2198,6 +3319,7 @@ module.exports = function (chai, _) {\n\
           , message\n\
         );\n\
 \n\
+        flag(this, 'object', err);\n\
         return this;\n\
       } else {\n\
         thrown = true;\n\
@@ -2223,6 +3345,8 @@ module.exports = function (chai, _) {\n\
       , (desiredError instanceof Error ? desiredError.toString() : desiredError)\n\
       , (thrownError instanceof Error ? thrownError.toString() : thrownError)\n\
     );\n\
+\n\
+    flag(this, 'object', thrownError);\n\
   };\n\
 \n\
   Assertion.addMethod('throw', assertThrows);\n\
@@ -2334,9 +3458,13 @@ module.exports = function (chai, _) {\n\
     );\n\
   });\n\
 \n\
-  function isSubsetOf(subset, superset) {\n\
+  function isSubsetOf(subset, superset, cmp) {\n\
     return subset.every(function(elem) {\n\
-      return superset.indexOf(elem) !== -1;\n\
+      if (!cmp) return superset.indexOf(elem) !== -1;\n\
+\n\
+      return superset.some(function(elem2) {\n\
+        return cmp(elem, elem2);\n\
+      });\n\
     })\n\
   }\n\
 \n\
@@ -2344,13 +3472,17 @@ module.exports = function (chai, _) {\n\
    * ### .members(set)\n\
    *\n\
    * Asserts that the target is a superset of `set`,\n\
-   * or that the target and `set` have the same members.\n\
+   * or that the target and `set` have the same strictly-equal (===) members.\n\
+   * Alternately, if the `deep` flag is set, set members are compared for deep\n\
+   * equality.\n\
    *\n\
    *     expect([1, 2, 3]).to.include.members([3, 2]);\n\
    *     expect([1, 2, 3]).to.not.include.members([3, 2, 8]);\n\
    *\n\
    *     expect([4, 2]).to.have.members([2, 4]);\n\
    *     expect([5, 2]).to.not.have.members([5, 2, 1]);\n\
+   *\n\
+   *     expect([{ id: 1 }]).to.deep.include.members([{ id: 1 }]);\n\
    *\n\
    * @name members\n\
    * @param {Array} set\n\
@@ -2365,9 +3497,11 @@ module.exports = function (chai, _) {\n\
     new Assertion(obj).to.be.an('array');\n\
     new Assertion(subset).to.be.an('array');\n\
 \n\
+    var cmp = flag(this, 'deep') ? _.eql : undefined;\n\
+\n\
     if (flag(this, 'contains')) {\n\
       return this.assert(\n\
-          isSubsetOf(subset, obj)\n\
+          isSubsetOf(subset, obj, cmp)\n\
         , 'expected #{this} to be a superset of #{act}'\n\
         , 'expected #{this} to not be a superset of #{act}'\n\
         , obj\n\
@@ -2376,7 +3510,7 @@ module.exports = function (chai, _) {\n\
     }\n\
 \n\
     this.assert(\n\
-        isSubsetOf(obj, subset) && isSubsetOf(subset, obj)\n\
+        isSubsetOf(obj, subset, cmp) && isSubsetOf(subset, obj, cmp)\n\
         , 'expected #{this} to have the same members as #{act}'\n\
         , 'expected #{this} to not have the same members as #{act}'\n\
         , obj\n\
@@ -2389,7 +3523,7 @@ module.exports = function (chai, _) {\n\
 require.register("chaijs-chai/lib/chai/interface/assert.js", Function("exports, require, module",
 "/*!\n\
  * chai\n\
- * Copyright(c) 2011-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2011-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
 \n\
@@ -2422,7 +3556,7 @@ module.exports = function (chai, util) {\n\
    */\n\
 \n\
   var assert = chai.assert = function (express, errmsg) {\n\
-    var test = new Assertion(null);\n\
+    var test = new Assertion(null, null, chai.assert);\n\
     test.assert(\n\
         express\n\
       , errmsg\n\
@@ -2444,13 +3578,12 @@ module.exports = function (chai, util) {\n\
    */\n\
 \n\
   assert.fail = function (actual, expected, message, operator) {\n\
-    throw new chai.AssertionError({\n\
+    message = message || 'assert.fail()';\n\
+    throw new chai.AssertionError(message, {\n\
         actual: actual\n\
       , expected: expected\n\
-      , message: message\n\
       , operator: operator\n\
-      , stackStartFunction: assert.fail\n\
-    });\n\
+    }, assert.fail);\n\
   };\n\
 \n\
   /**\n\
@@ -2504,7 +3637,7 @@ module.exports = function (chai, util) {\n\
    */\n\
 \n\
   assert.equal = function (act, exp, msg) {\n\
-    var test = new Assertion(act, msg);\n\
+    var test = new Assertion(act, msg, assert.equal);\n\
 \n\
     test.assert(\n\
         exp == flag(test, 'object')\n\
@@ -2530,7 +3663,7 @@ module.exports = function (chai, util) {\n\
    */\n\
 \n\
   assert.notEqual = function (act, exp, msg) {\n\
-    var test = new Assertion(act, msg);\n\
+    var test = new Assertion(act, msg, assert.notEqual);\n\
 \n\
     test.assert(\n\
         exp != flag(test, 'object')\n\
@@ -2781,8 +3914,8 @@ module.exports = function (chai, util) {\n\
    * Asserts that `value` is _not_ an object.\n\
    *\n\
    *     var selection = 'chai'\n\
-   *     assert.isObject(selection, 'tea selection is not an object');\n\
-   *     assert.isObject(null, 'null is not an object');\n\
+   *     assert.isNotObject(selection, 'tea selection is not an object');\n\
+   *     assert.isNotObject(null, 'null is not an object');\n\
    *\n\
    * @name isNotObject\n\
    * @param {Mixed} value\n\
@@ -3046,19 +4179,7 @@ module.exports = function (chai, util) {\n\
    */\n\
 \n\
   assert.include = function (exp, inc, msg) {\n\
-    var obj = new Assertion(exp, msg);\n\
-\n\
-    if (Array.isArray(exp)) {\n\
-      obj.to.include(inc);\n\
-    } else if ('string' === typeof exp) {\n\
-      obj.to.contain.string(inc);\n\
-    } else {\n\
-      throw new chai.AssertionError(\n\
-          'expected an array or string'\n\
-        , null\n\
-        , assert.include\n\
-      );\n\
-    }\n\
+    new Assertion(exp, msg, assert.include).include(inc);\n\
   };\n\
 \n\
   /**\n\
@@ -3078,19 +4199,7 @@ module.exports = function (chai, util) {\n\
    */\n\
 \n\
   assert.notInclude = function (exp, inc, msg) {\n\
-    var obj = new Assertion(exp, msg);\n\
-\n\
-    if (Array.isArray(exp)) {\n\
-      obj.to.not.include(inc);\n\
-    } else if ('string' === typeof exp) {\n\
-      obj.to.not.contain.string(inc);\n\
-    } else {\n\
-      throw new chai.AssertionError(\n\
-          'expected an array or string'\n\
-        , null\n\
-        , assert.notInclude\n\
-      );\n\
-    }\n\
+    new Assertion(exp, msg, assert.notInclude).not.include(inc);\n\
   };\n\
 \n\
   /**\n\
@@ -3334,7 +4443,8 @@ module.exports = function (chai, util) {\n\
       errt = null;\n\
     }\n\
 \n\
-    new Assertion(fn, msg).to.Throw(errt, errs);\n\
+    var assertErr = new Assertion(fn, msg).to.Throw(errt, errs);\n\
+    return flag(assertErr, 'object');\n\
   };\n\
 \n\
   /**\n\
@@ -3472,7 +4582,7 @@ module.exports = function (chai, util) {\n\
 require.register("chaijs-chai/lib/chai/interface/expect.js", Function("exports, require, module",
 "/*!\n\
  * chai\n\
- * Copyright(c) 2011-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2011-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
 \n\
@@ -3487,7 +4597,7 @@ module.exports = function (chai, util) {\n\
 require.register("chaijs-chai/lib/chai/interface/should.js", Function("exports, require, module",
 "/*!\n\
  * chai\n\
- * Copyright(c) 2011-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2011-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
 \n\
@@ -3495,31 +4605,33 @@ module.exports = function (chai, util) {\n\
   var Assertion = chai.Assertion;\n\
 \n\
   function loadShould () {\n\
+    // explicitly define this method as function as to have it's name to include as `ssfi`\n\
+    function shouldGetter() {\n\
+      if (this instanceof String || this instanceof Number) {\n\
+        return new Assertion(this.constructor(this), null, shouldGetter);\n\
+      } else if (this instanceof Boolean) {\n\
+        return new Assertion(this == true, null, shouldGetter);\n\
+      }\n\
+      return new Assertion(this, null, shouldGetter);\n\
+    }\n\
+    function shouldSetter(value) {\n\
+      // See https://github.com/chaijs/chai/issues/86: this makes\n\
+      // `whatever.should = someValue` actually set `someValue`, which is\n\
+      // especially useful for `global.should = require('chai').should()`.\n\
+      //\n\
+      // Note that we have to use [[DefineProperty]] instead of [[Put]]\n\
+      // since otherwise we would trigger this very setter!\n\
+      Object.defineProperty(this, 'should', {\n\
+        value: value,\n\
+        enumerable: true,\n\
+        configurable: true,\n\
+        writable: true\n\
+      });\n\
+    }\n\
     // modify Object.prototype to have `should`\n\
-    Object.defineProperty(Object.prototype, 'should',\n\
-      {\n\
-        set: function (value) {\n\
-          // See https://github.com/chaijs/chai/issues/86: this makes\n\
-          // `whatever.should = someValue` actually set `someValue`, which is\n\
-          // especially useful for `global.should = require('chai').should()`.\n\
-          //\n\
-          // Note that we have to use [[DefineProperty]] instead of [[Put]]\n\
-          // since otherwise we would trigger this very setter!\n\
-          Object.defineProperty(this, 'should', {\n\
-            value: value,\n\
-            enumerable: true,\n\
-            configurable: true,\n\
-            writable: true\n\
-          });\n\
-        }\n\
-      , get: function(){\n\
-          if (this instanceof String || this instanceof Number) {\n\
-            return new Assertion(this.constructor(this));\n\
-          } else if (this instanceof Boolean) {\n\
-            return new Assertion(this == true);\n\
-          }\n\
-          return new Assertion(this);\n\
-        }\n\
+    Object.defineProperty(Object.prototype, 'should', {\n\
+      set: shouldSetter\n\
+      , get: shouldGetter\n\
       , configurable: true\n\
     });\n\
 \n\
@@ -3566,7 +4678,7 @@ module.exports = function (chai, util) {\n\
 require.register("chaijs-chai/lib/chai/utils/addChainableMethod.js", Function("exports, require, module",
 "/*!\n\
  * Chai - addChainingMethod utility\n\
- * Copyright(c) 2012-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
 \n\
@@ -3575,6 +4687,8 @@ require.register("chaijs-chai/lib/chai/utils/addChainableMethod.js", Function("e
  */\n\
 \n\
 var transferFlags = require('./transferFlags');\n\
+var flag = require('./flag');\n\
+var config = require('../config');\n\
 \n\
 /*!\n\
  * Module variables\n\
@@ -3621,15 +4735,30 @@ var call  = Function.prototype.call,\n\
  */\n\
 \n\
 module.exports = function (ctx, name, method, chainingBehavior) {\n\
-  if (typeof chainingBehavior !== 'function')\n\
+  if (typeof chainingBehavior !== 'function') {\n\
     chainingBehavior = function () { };\n\
+  }\n\
+\n\
+  var chainableBehavior = {\n\
+      method: method\n\
+    , chainingBehavior: chainingBehavior\n\
+  };\n\
+\n\
+  // save the methods so we can overwrite them later, if we need to.\n\
+  if (!ctx.__methods) {\n\
+    ctx.__methods = {};\n\
+  }\n\
+  ctx.__methods[name] = chainableBehavior;\n\
 \n\
   Object.defineProperty(ctx, name,\n\
     { get: function () {\n\
-        chainingBehavior.call(this);\n\
+        chainableBehavior.chainingBehavior.call(this);\n\
 \n\
-        var assert = function () {\n\
-          var result = method.apply(this, arguments);\n\
+        var assert = function assert() {\n\
+          var old_ssfi = flag(this, 'ssfi');\n\
+          if (old_ssfi && config.includeStack === false)\n\
+            flag(this, 'ssfi', assert);\n\
+          var result = chainableBehavior.method.apply(this, arguments);\n\
           return result === undefined ? this : result;\n\
         };\n\
 \n\
@@ -3663,9 +4792,11 @@ module.exports = function (ctx, name, method, chainingBehavior) {\n\
 require.register("chaijs-chai/lib/chai/utils/addMethod.js", Function("exports, require, module",
 "/*!\n\
  * Chai - addMethod utility\n\
- * Copyright(c) 2012-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
+\n\
+var config = require('../config');\n\
 \n\
 /**\n\
  * ### .addMethod (ctx, name, method)\n\
@@ -3691,9 +4822,13 @@ require.register("chaijs-chai/lib/chai/utils/addMethod.js", Function("exports, r
  * @name addMethod\n\
  * @api public\n\
  */\n\
+var flag = require('./flag');\n\
 \n\
 module.exports = function (ctx, name, method) {\n\
   ctx[name] = function () {\n\
+    var old_ssfi = flag(this, 'ssfi');\n\
+    if (old_ssfi && config.includeStack === false)\n\
+      flag(this, 'ssfi', ctx[name]);\n\
     var result = method.apply(this, arguments);\n\
     return result === undefined ? this : result;\n\
   };\n\
@@ -3703,7 +4838,7 @@ module.exports = function (ctx, name, method) {\n\
 require.register("chaijs-chai/lib/chai/utils/addProperty.js", Function("exports, require, module",
 "/*!\n\
  * Chai - addProperty utility\n\
- * Copyright(c) 2012-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
 \n\
@@ -3746,7 +4881,7 @@ module.exports = function (ctx, name, getter) {\n\
 require.register("chaijs-chai/lib/chai/utils/flag.js", Function("exports, require, module",
 "/*!\n\
  * Chai - flag utility\n\
- * Copyright(c) 2012-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
 \n\
@@ -3781,7 +4916,7 @@ module.exports = function (obj, key, value) {\n\
 require.register("chaijs-chai/lib/chai/utils/getActual.js", Function("exports, require, module",
 "/*!\n\
  * Chai - getActual utility\n\
- * Copyright(c) 2012-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
 \n\
@@ -3795,15 +4930,14 @@ require.register("chaijs-chai/lib/chai/utils/getActual.js", Function("exports, r
  */\n\
 \n\
 module.exports = function (obj, args) {\n\
-  var actual = args[4];\n\
-  return 'undefined' !== typeof actual ? actual : obj._obj;\n\
+  return args.length > 4 ? args[4] : obj._obj;\n\
 };\n\
 //@ sourceURL=chaijs-chai/lib/chai/utils/getActual.js"
 ));
 require.register("chaijs-chai/lib/chai/utils/getEnumerableProperties.js", Function("exports, require, module",
 "/*!\n\
  * Chai - getEnumerableProperties utility\n\
- * Copyright(c) 2012-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
 \n\
@@ -3831,7 +4965,7 @@ module.exports = function getEnumerableProperties(object) {\n\
 require.register("chaijs-chai/lib/chai/utils/getMessage.js", Function("exports, require, module",
 "/*!\n\
  * Chai - message composition utility\n\
- * Copyright(c) 2012-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
 \n\
@@ -3883,7 +5017,7 @@ module.exports = function (obj, args) {\n\
 require.register("chaijs-chai/lib/chai/utils/getName.js", Function("exports, require, module",
 "/*!\n\
  * Chai - getName utility\n\
- * Copyright(c) 2012-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
 \n\
@@ -3906,7 +5040,7 @@ module.exports = function (func) {\n\
 require.register("chaijs-chai/lib/chai/utils/getPathValue.js", Function("exports, require, module",
 "/*!\n\
  * Chai - getPathValue utility\n\
- * Copyright(c) 2012-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * @see https://github.com/logicalparadox/filtr\n\
  * MIT Licensed\n\
  */\n\
@@ -4011,7 +5145,7 @@ function _getPathValue (parsed, obj) {\n\
 require.register("chaijs-chai/lib/chai/utils/getProperties.js", Function("exports, require, module",
 "/*!\n\
  * Chai - getProperties utility\n\
- * Copyright(c) 2012-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
 \n\
@@ -4154,6 +5288,12 @@ exports.overwriteMethod = require('./overwriteMethod');\n\
  */\n\
 \n\
 exports.addChainableMethod = require('./addChainableMethod');\n\
+\n\
+/*!\n\
+ * Overwrite chainable method\n\
+ */\n\
+\n\
+exports.overwriteChainableMethod = require('./overwriteChainableMethod');\n\
 \n\
 //@ sourceURL=chaijs-chai/lib/chai/utils/index.js"
 ));
@@ -4492,7 +5632,7 @@ function objectToString(o) {\n\
 require.register("chaijs-chai/lib/chai/utils/objDisplay.js", Function("exports, require, module",
 "/*!\n\
  * Chai - flag utility\n\
- * Copyright(c) 2012-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
 \n\
@@ -4501,6 +5641,7 @@ require.register("chaijs-chai/lib/chai/utils/objDisplay.js", Function("exports, 
  */\n\
 \n\
 var inspect = require('./inspect');\n\
+var config = require('../config');\n\
 \n\
 /**\n\
  * ### .objDisplay (object)\n\
@@ -4518,7 +5659,7 @@ module.exports = function (obj) {\n\
   var str = inspect(obj)\n\
     , type = Object.prototype.toString.call(obj);\n\
 \n\
-  if (str.length >= 40) {\n\
+  if (config.truncateThreshold && str.length >= config.truncateThreshold) {\n\
     if (type === '[object Function]') {\n\
       return !obj.name || obj.name === ''\n\
         ? '[Function]'\n\
@@ -4543,7 +5684,7 @@ module.exports = function (obj) {\n\
 require.register("chaijs-chai/lib/chai/utils/overwriteMethod.js", Function("exports, require, module",
 "/*!\n\
  * Chai - overwriteMethod utility\n\
- * Copyright(c) 2012-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
 \n\
@@ -4597,7 +5738,7 @@ module.exports = function (ctx, name, method) {\n\
 require.register("chaijs-chai/lib/chai/utils/overwriteProperty.js", Function("exports, require, module",
 "/*!\n\
  * Chai - overwriteProperty utility\n\
- * Copyright(c) 2012-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
 \n\
@@ -4651,10 +5792,66 @@ module.exports = function (ctx, name, getter) {\n\
 };\n\
 //@ sourceURL=chaijs-chai/lib/chai/utils/overwriteProperty.js"
 ));
+require.register("chaijs-chai/lib/chai/utils/overwriteChainableMethod.js", Function("exports, require, module",
+"/*!\n\
+ * Chai - overwriteChainableMethod utility\n\
+ * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
+ * MIT Licensed\n\
+ */\n\
+\n\
+/**\n\
+ * ### overwriteChainableMethod (ctx, name, fn)\n\
+ *\n\
+ * Overwites an already existing chainable method\n\
+ * and provides access to the previous function or\n\
+ * property.  Must return functions to be used for\n\
+ * name.\n\
+ *\n\
+ *     utils.overwriteChainableMethod(chai.Assertion.prototype, 'length',\n\
+ *       function (_super) {\n\
+ *       }\n\
+ *     , function (_super) {\n\
+ *       }\n\
+ *     );\n\
+ *\n\
+ * Can also be accessed directly from `chai.Assertion`.\n\
+ *\n\
+ *     chai.Assertion.overwriteChainableMethod('foo', fn, fn);\n\
+ *\n\
+ * Then can be used as any other assertion.\n\
+ *\n\
+ *     expect(myFoo).to.have.length(3);\n\
+ *     expect(myFoo).to.have.length.above(3);\n\
+ *\n\
+ * @param {Object} ctx object whose method / property is to be overwritten\n\
+ * @param {String} name of method / property to overwrite\n\
+ * @param {Function} method function that returns a function to be used for name\n\
+ * @param {Function} chainingBehavior function that returns a function to be used for property\n\
+ * @name overwriteChainableMethod\n\
+ * @api public\n\
+ */\n\
+\n\
+module.exports = function (ctx, name, method, chainingBehavior) {\n\
+  var chainableBehavior = ctx.__methods[name];\n\
+\n\
+  var _chainingBehavior = chainableBehavior.chainingBehavior;\n\
+  chainableBehavior.chainingBehavior = function () {\n\
+    var result = chainingBehavior(_chainingBehavior).call(this);\n\
+    return result === undefined ? this : result;\n\
+  };\n\
+\n\
+  var _method = chainableBehavior.method;\n\
+  chainableBehavior.method = function () {\n\
+    var result = method(_method).apply(this, arguments);\n\
+    return result === undefined ? this : result;\n\
+  };\n\
+};\n\
+//@ sourceURL=chaijs-chai/lib/chai/utils/overwriteChainableMethod.js"
+));
 require.register("chaijs-chai/lib/chai/utils/test.js", Function("exports, require, module",
 "/*!\n\
  * Chai - test utility\n\
- * Copyright(c) 2012-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
 \n\
@@ -4683,7 +5880,7 @@ module.exports = function (obj, args) {\n\
 require.register("chaijs-chai/lib/chai/utils/transferFlags.js", Function("exports, require, module",
 "/*!\n\
  * Chai - transferFlags utility\n\
- * Copyright(c) 2012-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
 \n\
@@ -4730,7 +5927,7 @@ module.exports = function (assertion, object, includeAll) {\n\
 require.register("chaijs-chai/lib/chai/utils/type.js", Function("exports, require, module",
 "/*!\n\
  * Chai - type utility\n\
- * Copyright(c) 2012-2013 Jake Luer <jake@alogicalparadox.com>\n\
+ * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
 \n\
@@ -4776,25 +5973,67 @@ module.exports = function (obj) {\n\
 //@ sourceURL=chaijs-chai/lib/chai/utils/type.js"
 ));
 require.register("lru-cache/index.js", Function("exports, require, module",
-"var store = require('store');\n\
+"var lf = require('localforage'),\n\
+    Promise = window.Promise;\n\
 \n\
 // max size if not specifed\n\
 var MAX_SIZE = 5000000;\n\
+\n\
+/**\n\
+ * hasOwnProperty alias\n\
+ * @param  {Object} obj\n\
+ * @param  {String} key\n\
+ *\n\
+ * @return {Boolean}\n\
+ */\n\
 \n\
 function hop (obj, key) {\n\
   return Object.prototype.hasOwnProperty.call(obj, key);\n\
 }\n\
 \n\
 /**\n\
+ * Store class\n\
+ * thin layer on top of localforage to allow namespacing\n\
+ */\n\
+\n\
+function Store(_) {\n\
+  if (!(this instanceof Store)) return new Store(_);\n\
+  this._ = _ || '_';\n\
+}\n\
+\n\
+Store.prototype.setItem = function(key, val, cb) {\n\
+  return lf.setItem(this._ + key, val, cb);\n\
+};\n\
+\n\
+Store.prototype.getItem = function(key, cb) {\n\
+  return lf.getItem(this._ + key, cb);\n\
+};\n\
+\n\
+Store.prototype.removeItem = function(key, cb) {\n\
+  return lf.removeItem(this._ + key, cb);\n\
+};\n\
+\n\
+Store.prototype.get = function(cb) {\n\
+  return this.getItem('', cb);\n\
+};\n\
+\n\
+Store.prototype.save = function(val, cb) {\n\
+  return this.setItem('', val, cb);\n\
+};\n\
+\n\
+\n\
+/**\n\
  * Entry Class\n\
+ * container for lru items\n\
  */\n\
 \n\
 function Entry (key, value, lu, age, loaded) {\n\
   this.key = key;\n\
+  this.value = value;\n\
   this.lu = lu;\n\
   this.age = age;\n\
+  this.length = key.toString().length + JSON.stringify(value || null).length;\n\
   this.loaded = loaded;\n\
-  this.value = value;\n\
 }\n\
 \n\
 /**\n\
@@ -4806,30 +6045,45 @@ Entry.prototype.getAge = function() {\n\
 };\n\
 \n\
 /**\n\
- * cache class\n\
- * use ls store with `name` namespace defaulting to cache\n\
+ * Cache class\n\
  */\n\
 \n\
 function Cache(name) {\n\
-  this.store = store.ns(name || 'lru');\n\
+\n\
+  // namespaced storage instance\n\
+  this.store = new Store(name || 'lru/');\n\
+\n\
+  // hash of items by key\n\
   this.items = Object.create(null);\n\
+\n\
+  // list of items in order of use recency\n\
   this.list = Object.create(null);\n\
 }\n\
 \n\
 /**\n\
  * update cache ls entries\n\
+ *\n\
+ * @return {Promise}\n\
  */\n\
 \n\
 Cache.prototype.update = function () {\n\
-  this.store.save(Object.keys(this.list).map(function (key) {\n\
-    var item = this.list[key];\n\
-    return {\n\
-      key: item.key,\n\
-      age: item.age,\n\
-      lu: item.lu,\n\
-      length: item.length\n\
-    };\n\
-  }, this));\n\
+  var entries;\n\
+\n\
+  // serialize entries\n\
+  entries = Object\n\
+    .keys(this.list)\n\
+    .map(function (key) {\n\
+      var item = this.list[key];\n\
+      return {\n\
+        key: item.key,\n\
+        age: item.age,\n\
+        lu: item.lu,\n\
+        length: item.length\n\
+      };\n\
+    }, this);\n\
+\n\
+  // save it\n\
+  return this.store.save(entries);\n\
 };\n\
 \n\
 /**\n\
@@ -4837,15 +6091,26 @@ Cache.prototype.update = function () {\n\
  * get entry value, load value from ls if value is not yet loaded\n\
  *\n\
  * @param {string} key\n\
+ * @return {Promise}\n\
  */\n\
 \n\
 Cache.prototype.get = function (key) {\n\
-  if (!hop(this.items, key)) return;\n\
+\n\
+  // key does not exist\n\
+  if (!hop(this.items, key)) return Promise.resolve();\n\
+\n\
+  // get item from mem store\n\
   var item = this.items[key];\n\
-  if (item.loaded) return item;\n\
-  item.value = this.store.get(key);\n\
-  item.loaded = true;\n\
-  return item;\n\
+  if (item.loaded) return Promise.resolve(item);\n\
+\n\
+  // load item from store\n\
+  return this.store\n\
+    .getItem(key)\n\
+    .then(function(value) {\n\
+      item.value = value;\n\
+      item.loaded = true;\n\
+      return item;\n\
+    });\n\
 };\n\
 \n\
 /**\n\
@@ -4861,23 +6126,17 @@ Cache.prototype.has = function (key) {\n\
 \n\
 /**\n\
  * set value\n\
- * store it in ls and set entry length\n\
+ * set entry length and store it cache\n\
  *\n\
  * @param {String} key\n\
  * @param {Entry} hit\n\
- * @return {Boolean} false if store failed to save the value\n\
+ *\n\
+ * @return {Promise}\n\
  */\n\
 \n\
 Cache.prototype.set = function (key, hit) {\n\
-  var length, data;\n\
-\n\
   this.list[hit.lu] = this.items[key] = hit;\n\
-  if (hit.loaded) {\n\
-    data = JSON.stringify(hit.value || null);\n\
-    hit.length =  key.toString().length + data.length;\n\
-    return !this.store.setItem(key, data);\n\
-  }\n\
-  return true;\n\
+  return this.store.setItem(key, hit.value);\n\
 };\n\
 \n\
 /**\n\
@@ -4888,7 +6147,7 @@ Cache.prototype.set = function (key, hit) {\n\
 \n\
 Cache.prototype.del = function (key) {\n\
   delete this.items[key];\n\
-  this.store.del(key);\n\
+  return this.store.removeItem(key);\n\
 };\n\
 \n\
 /**\n\
@@ -4896,9 +6155,21 @@ Cache.prototype.del = function (key) {\n\
  */\n\
 \n\
 Cache.prototype.reset = function () {\n\
-  this.store.reset();\n\
-  this.items = Object.create(null);\n\
-  this.list = Object.create(null);\n\
+  var _this = this,\n\
+      promises;\n\
+\n\
+  promises = Object\n\
+    .keys(this.items)\n\
+    .map(function(key) {\n\
+      return _this.store.removeItem(key);\n\
+    });\n\
+\n\
+  return Promise\n\
+    .all(promises)\n\
+    .then(function() {\n\
+      _this.items = Object.create(null);\n\
+      _this.list = Object.create(null);\n\
+    });\n\
 };\n\
 \n\
 /**\n\
@@ -4920,10 +6191,10 @@ function LRUCache (options) {\n\
 \n\
   // states\n\
   var cache = new Cache(options.name),\n\
-      mru, // most recently used\n\
-      lru, // least recently used\n\
-      length, // number of items in the list\n\
-      itemCount;\n\
+      mru = 0, // most recently used\n\
+      lru = 0, // least recently used\n\
+      length = 0, // number of items in the list\n\
+      itemCount = 0;\n\
 \n\
   /**\n\
    * @property {Number} max cache max size\n\
@@ -4969,7 +6240,8 @@ function LRUCache (options) {\n\
    */\n\
 \n\
   function shiftLU(hit) {\n\
-    // remvove hit\n\
+\n\
+    // remove hit\n\
     delete cache.list[hit.lu];\n\
 \n\
     // update least recently used\n\
@@ -4993,54 +6265,36 @@ function LRUCache (options) {\n\
   }\n\
 \n\
   /**\n\
-   * trim cache\n\
-   * remove oldest items until length < max\n\
-   */\n\
-\n\
-  function trim () {\n\
-    while (lru < mru && length > max)\n\
-      del(cache.list[lru]);\n\
-  }\n\
-\n\
-  /**\n\
    * delete entry in the cache\n\
    *\n\
    * @param  {Entry} hit\n\
+   *\n\
+   * @return {Promise}\n\
    */\n\
 \n\
   function del(hit) {\n\
-    if (hit) {\n\
-      length -= hit.length;\n\
-      itemCount--;\n\
-      cache.del(hit.key);\n\
-      shiftLU(hit);\n\
-    }\n\
+    if (!hit) return Promise.reject(new Error('no hit'));\n\
+    length -= hit.length;\n\
+    itemCount--;\n\
+    shiftLU(hit);\n\
+    return cache.del(hit.key);\n\
   }\n\
 \n\
   /**\n\
-   *  Iterates over all the keys in the cache, in order of recent-ness\n\
+   * trim cache\n\
+   * remove oldest items until length < max\n\
    *\n\
-   * @param  {Function} fn\n\
-   * @param  {Object}   thisp [description]\n\
+   * @return {Promise}\n\
    */\n\
 \n\
-  this.forEach = function (fn, thisp) {\n\
-    thisp = thisp || this;\n\
-    var i = 0;\n\
-    for (var k = mru - 1; k >= 0 && i < itemCount; k--) {\n\
-      if (cache.list[k]) {\n\
-        i++;\n\
-        var hit = cache.list[k];\n\
-        if (maxAge && (hit.getAge() > maxAge)) {\n\
-          del(hit);\n\
-          hit = undefined;\n\
-        }\n\
-        if (hit) {\n\
-          fn.call(thisp, hit.value, hit.key, this);\n\
-        }\n\
-      }\n\
+  function trim () {\n\
+    var dels = [];\n\
+    while (lru < mru && length > max) {\n\
+      dels.push(del(cache.list[lru]));\n\
     }\n\
-  };\n\
+\n\
+    return Promise.all(dels);\n\
+  }\n\
 \n\
   /**\n\
    * Return an array of the keys in the cache.\n\
@@ -5061,24 +6315,6 @@ function LRUCache (options) {\n\
   };\n\
 \n\
   /**\n\
-   * Return an array of the values in the cache.\n\
-   *\n\
-   * @return {Array}\n\
-   */\n\
-\n\
-  this.values = function () {\n\
-    var values = new Array(itemCount);\n\
-    var i = 0;\n\
-    for (var k = mru - 1; k >= 0 && i < itemCount; k--) {\n\
-      if (cache.list[k]) {\n\
-        var hit = cache.list[k];\n\
-        values[i++] = hit.value;\n\
-      }\n\
-    }\n\
-    return values;\n\
-  };\n\
-\n\
-  /**\n\
    * get a key in the cache\n\
    * update LRU when `doUse` is true\n\
    * delete expired keys\n\
@@ -5086,21 +6322,18 @@ function LRUCache (options) {\n\
    * @param  {String} key\n\
    * @param  {Boolean} doUse update LRU\n\
    *\n\
-   * @return {Object} Entry value\n\
+   * @return {Promise} promise of the Entry value\n\
    */\n\
 \n\
   function get (key, doUse) {\n\
-    var hit = cache.get(key);\n\
-    if (hit) {\n\
-      if (maxAge && (hit.getAge() > maxAge)) {\n\
-        del(hit);\n\
-        hit = undefined;\n\
-      } else {\n\
+    return cache\n\
+      .get(key)\n\
+      .then(function(hit) {\n\
+        if (!hit) return;\n\
+        if (maxAge && (hit.getAge() > maxAge)) return del(hit);\n\
         if (doUse) use(hit);\n\
-      }\n\
-      if (hit) hit = hit.value;\n\
-    }\n\
-    return hit;\n\
+        return hit.value;\n\
+      });\n\
   }\n\
 \n\
   /**\n\
@@ -5108,35 +6341,38 @@ function LRUCache (options) {\n\
    *\n\
    * @param {String} key\n\
    * @param {Object} value\n\
+   *\n\
+   * @return {Promise}\n\
    */\n\
 \n\
   this.set = function (key, value) {\n\
     var age = maxAge ? Date.now() : 0;\n\
     var hit = new Entry(key, value, mru++, age, true);\n\
-    var res = cache.set(key, hit);\n\
 \n\
     // oversized objects fall out of cache automatically.\n\
-    if (hit.length > max) {\n\
-      cache.del(key);\n\
-      return false;\n\
+    if (hit.length > max) return Promise.reject(new Error('oversized'));\n\
+\n\
+    // trim and retry until it works\n\
+    function retry() {\n\
+      var entry = cache.list[lru];\n\
+      if (!entry) throw new Error('fail to set key ' + key);\n\
+\n\
+      return del(entry).then(function() {\n\
+        return cache.set(key, hit);\n\
+      });\n\
     }\n\
 \n\
-    // if we failed to save to ls\n\
-    // trim until it works\n\
-    while (!res && length) {\n\
-      del(cache.list[lru]);\n\
-      res = cache.set(key, hit);\n\
+    // update cache\n\
+    function update() {\n\
+      length += hit.length;\n\
+      itemCount ++;\n\
+      if (length > max) return trim();\n\
+      return cache.update();\n\
     }\n\
 \n\
-    // failed to store to ls\n\
-    if (!res) return false;\n\
-\n\
-    length += hit.length;\n\
-    itemCount ++;\n\
-\n\
-    if (length > max) trim();\n\
-    cache.update();\n\
-    return true;\n\
+    return cache\n\
+      .set(key, hit)\n\
+      .then(update, retry);\n\
   };\n\
 \n\
   /**\n\
@@ -5144,11 +6380,11 @@ function LRUCache (options) {\n\
    */\n\
 \n\
   this.reset = function () {\n\
-    cache.reset();\n\
     lru = 0;\n\
     mru = 0;\n\
     length = 0;\n\
     itemCount = 0;\n\
+    return cache.reset();\n\
   };\n\
 \n\
   /**\n\
@@ -5162,9 +6398,7 @@ function LRUCache (options) {\n\
   this.has = function (key) {\n\
     if (!cache.has(key)) return false;\n\
     var hit = cache.get(key);\n\
-    if (maxAge && (hit.getAge() > maxAge)) {\n\
-      return false;\n\
-    }\n\
+    if (maxAge && (hit.getAge() > maxAge)) return false;\n\
     return true;\n\
   };\n\
 \n\
@@ -5177,16 +6411,17 @@ function LRUCache (options) {\n\
    */\n\
 \n\
   this.get = function (key) {\n\
-    var v = get(key, true);\n\
-    cache.update();\n\
-    return v;\n\
+    return get(key, true).then(function(v) {\n\
+      cache.update();\n\
+      return v;\n\
+    });\n\
   };\n\
 \n\
   /**\n\
    * get key Entry\n\
    *\n\
    * @param  {String} key\n\
-   * @return {Object}\n\
+   * @return {Promise}\n\
    */\n\
 \n\
   this.getEntry = function (key) {\n\
@@ -5197,7 +6432,7 @@ function LRUCache (options) {\n\
    * get a key in the cache without updating the recent-ness\n\
    *\n\
    * @param  {String} key\n\
-   * @return {Object}\n\
+   * @return {Promise}\n\
    */\n\
 \n\
   this.peek = function (key) {\n\
@@ -5216,28 +6451,36 @@ function LRUCache (options) {\n\
    * delete a key in the cache\n\
    *\n\
    * @param  {String} key\n\
-   * @return {Object}\n\
+   * @return {Promise}\n\
    */\n\
 \n\
   this.del = function (key) {\n\
-    cache.del(key);\n\
-    cache.update();\n\
+    cache.del(key).then(function() {\n\
+      cache.update();\n\
+    });\n\
   };\n\
 \n\
-  // init cache\n\
-  var items = cache.store.get() || [];\n\
-  length = 0;\n\
+  this.load = function() {\n\
+    return cache.store\n\
+      .get()\n\
+      .then(function(items) {\n\
 \n\
-  items.forEach(function (obj) {\n\
-    var entry = new Entry (obj.key, null, obj.lu, obj.age);\n\
-    entry.length = obj.length;\n\
-    cache.set(obj.key, entry);\n\
-    length += entry.length;\n\
-  }, this);\n\
+        if (!items) return;\n\
 \n\
-  lru = (items[0] && items[0].lu) || 0;\n\
-  mru = (items.length && items[items.length - 1].lu) || 0;\n\
-  itemCount = items.length;\n\
+        // init cache items\n\
+        items.forEach(function (obj) {\n\
+          var entry = new Entry (obj.key, null, obj.lu, obj.age);\n\
+          entry.length = obj.length;\n\
+          cache.items[obj.key] = entry;\n\
+          cache.list[entry.lu] = entry;\n\
+          length += entry.length;\n\
+        });\n\
+\n\
+        lru = (items[0] && items[0].lu) || 0;\n\
+        mru = (items.length && items[items.length - 1].lu) || 0;\n\
+        itemCount = items.length;\n\
+      });\n\
+  };\n\
 }\n\
 \n\
 /*!\n\
@@ -5253,13 +6496,17 @@ module.exports = LRUCache;\n\
 
 
 
-require.alias("pgherveou-store/index.js", "lru-cache/deps/store/index.js");
-require.alias("pgherveou-store/index.js", "lru-cache/deps/store/index.js");
-require.alias("pgherveou-store/index.js", "store/index.js");
-require.alias("pgherveou-store/index.js", "pgherveou-store/index.js");
+require.alias("pgherveou-localforage/src/localforage.js", "lru-cache/deps/localforage/src/localforage.js");
+require.alias("pgherveou-localforage/src/drivers/indexeddb.js", "lru-cache/deps/localforage/src/drivers/indexeddb.js");
+require.alias("pgherveou-localforage/src/drivers/localstorage.js", "lru-cache/deps/localforage/src/drivers/localstorage.js");
+require.alias("pgherveou-localforage/src/drivers/websql.js", "lru-cache/deps/localforage/src/drivers/websql.js");
+require.alias("pgherveou-localforage/src/localforage.js", "lru-cache/deps/localforage/index.js");
+require.alias("pgherveou-localforage/src/localforage.js", "localforage/index.js");
+require.alias("pgherveou-localforage/src/localforage.js", "pgherveou-localforage/index.js");
 require.alias("chaijs-chai/index.js", "lru-cache/deps/chai/index.js");
 require.alias("chaijs-chai/lib/chai.js", "lru-cache/deps/chai/lib/chai.js");
 require.alias("chaijs-chai/lib/chai/assertion.js", "lru-cache/deps/chai/lib/chai/assertion.js");
+require.alias("chaijs-chai/lib/chai/config.js", "lru-cache/deps/chai/lib/chai/config.js");
 require.alias("chaijs-chai/lib/chai/core/assertions.js", "lru-cache/deps/chai/lib/chai/core/assertions.js");
 require.alias("chaijs-chai/lib/chai/interface/assert.js", "lru-cache/deps/chai/lib/chai/interface/assert.js");
 require.alias("chaijs-chai/lib/chai/interface/expect.js", "lru-cache/deps/chai/lib/chai/interface/expect.js");
@@ -5279,6 +6526,7 @@ require.alias("chaijs-chai/lib/chai/utils/inspect.js", "lru-cache/deps/chai/lib/
 require.alias("chaijs-chai/lib/chai/utils/objDisplay.js", "lru-cache/deps/chai/lib/chai/utils/objDisplay.js");
 require.alias("chaijs-chai/lib/chai/utils/overwriteMethod.js", "lru-cache/deps/chai/lib/chai/utils/overwriteMethod.js");
 require.alias("chaijs-chai/lib/chai/utils/overwriteProperty.js", "lru-cache/deps/chai/lib/chai/utils/overwriteProperty.js");
+require.alias("chaijs-chai/lib/chai/utils/overwriteChainableMethod.js", "lru-cache/deps/chai/lib/chai/utils/overwriteChainableMethod.js");
 require.alias("chaijs-chai/lib/chai/utils/test.js", "lru-cache/deps/chai/lib/chai/utils/test.js");
 require.alias("chaijs-chai/lib/chai/utils/transferFlags.js", "lru-cache/deps/chai/lib/chai/utils/transferFlags.js");
 require.alias("chaijs-chai/lib/chai/utils/type.js", "lru-cache/deps/chai/lib/chai/utils/type.js");

@@ -1,9 +1,9 @@
 {
   "name": "lru-cache",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "description": "LRU cache for the browser backed by localstorage",
   "dependencies": {
-    "pgherveou/store": "*"
+    "pgherveou/localforage": "*"
   },
   "development": {
     "chaijs/chai": "*"
