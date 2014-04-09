@@ -3,7 +3,7 @@
   "version": "0.0.2",
   "description": "LRU cache for the browser backed by localstorage",
   "dependencies": {
-    "pgherveou/store": "*"
+    "pgherveou/localforage": "*"
   },
   "development": {
     "chaijs/chai": "*"
