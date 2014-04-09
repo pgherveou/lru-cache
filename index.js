@@ -30,21 +30,22 @@ Store.prototype.setItem = function(key, val, cb) {
   return lf.setItem(this._ + key, val, cb);
 };
 
-Store.prototype.save = function(val, cb) {
-  return this.setItem('', val, cb);
-};
-
 Store.prototype.getItem = function(key, cb) {
   return lf.getItem(this._ + key, cb);
-};
-
-Store.prototype.get = function(cb) {
-  return lf.getItem('', cb);
 };
 
 Store.prototype.removeItem = function(key, cb) {
   return lf.removeItem(this._ + key, cb);
 };
+
+Store.prototype.get = function(cb) {
+  return this.getItem('', cb);
+};
+
+Store.prototype.save = function(val, cb) {
+  return this.setItem('', val, cb);
+};
+
 
 /**
  * Entry Class
@@ -129,7 +130,7 @@ Cache.prototype.get = function (key) {
 
   // load item from store
   return this.store
-    .get(key)
+    .getItem(key)
     .then(function(value) {
       item.value = value;
       item.loaded = true;
@@ -215,11 +216,10 @@ function LRUCache (options) {
 
   // states
   var cache = new Cache(options.name),
-      mru, // most recently used
-      lru, // least recently used
-      length, // number of items in the list
-      load,
-      itemCount;
+      mru = 0, // most recently used
+      lru = 0, // least recently used
+      length = 0, // number of items in the list
+      itemCount = 0;
 
   /**
    * @property {Number} max cache max size
@@ -375,7 +375,7 @@ function LRUCache (options) {
     var hit = new Entry(key, value, mru++, age, true);
 
     // oversized objects fall out of cache automatically.
-    if (hit.length > max) return Promise.reject(new Error('oversized objects'));
+    if (hit.length > max) return Promise.reject(new Error('oversized'));
 
     // trim and retry until it works
     function retry() {
@@ -485,27 +485,27 @@ function LRUCache (options) {
     });
   };
 
-  // init cache
-  length = 0;
+  this.load = function() {
+    return cache.store
+      .get()
+      .then(function(items) {
 
-  // load cache
-  load = cache.store
-    .get()
-    .then(function(items) {
+        if (!items) return;
 
-      // init cache items
-      items.forEach(function (obj) {
-        var entry = new Entry (obj.key, null, obj.lu, obj.age);
-        entry.length = obj.length;
-        this.items[obj.key] = entry;
-        this.list[entry.lu] = entry;
-        length += entry.length;
-      }, this);
+        // init cache items
+        items.forEach(function (obj) {
+          var entry = new Entry (obj.key, null, obj.lu, obj.age);
+          entry.length = obj.length;
+          cache.items[obj.key] = entry;
+          cache.list[entry.lu] = entry;
+          length += entry.length;
+        });
 
-      lru = (items[0] && items[0].lu) || 0;
-      mru = (items.length && items[items.length - 1].lu) || 0;
-      itemCount = items.length;
-    });
+        lru = (items[0] && items[0].lu) || 0;
+        mru = (items.length && items[items.length - 1].lu) || 0;
+        itemCount = items.length;
+      });
+  };
 }
 
 /*!

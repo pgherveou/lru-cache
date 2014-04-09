@@ -1,4 +1,4 @@
-/* global describe:true, beforeEach: true, it:true */
+/* global DOMException: true, it: true, describe:true, before: true, afterEach: true, it:true */
 
 var LRU = require('lru-cache'),
     lf = require('localforage'),
@@ -6,24 +6,36 @@ var LRU = require('lru-cache'),
     chai = require('chai'),
     expect = chai.expect;
 
-window.lf = lf;
 lf.setDriver('localStorageWrapper');
+
+/**
+ * wait closure
+ *
+ * @param  {Number} time
+ *
+ * @return Promise
+ */
+
+function wait(time) {
+  return function() {
+    return new Promise(function(resolve) {
+      setTimeout(resolve, time);
+    })
+  };
+}
+
 
 function calcLength(key ,val) {
   return key.length + (JSON.stringify(val)).length;
 }
 
-Promise.prototype.end = function(done) {
-  this.then(null, done);
-};
+afterEach(function () {
+  return lf.clear();
+});
 
 describe('basic tests', function () {
 
-  beforeEach(function (done) {
-    lf.clear(done);
-  });
-
-  it('basic', function (done) {
+  it('basic', function () {
     var cache = new LRU(calcLength('key', 'value'));
 
     var p1 = cache
@@ -37,21 +49,22 @@ describe('basic tests', function () {
 
     var p2 = cache
       .get('nada')
-      .then(function(val) { expect(val).to.be.undefined; });
+      .then(function(val) {
+        expect(val).to.be.undefined;
+      });
 
-    Promise
+    return Promise
       .all([p1, p2])
       .then(function() {
         expect(cache.length).to.eq(calcLength('key', 'value'));
         expect(cache.max).to.eq(10);
-        done();
-      }).end(done);
+      });
   });
 
-  it('least recently set', function (done) {
+  it('least recently set', function () {
     var cache = new LRU(2 * calcLength('a', 'A'));
 
-    Promise.resolve()
+    return Promise.resolve()
       .then(function() { return cache.set('a', 'A'); })
       .then(function() { return cache.set('b', 'B'); })
       .then(function() { return cache.set('c', 'C'); })
@@ -62,236 +75,167 @@ describe('basic tests', function () {
       .then(function() { return cache.get('b'); })
       .then(function(v) { expect(v).to.eq('B'); })
 
-      .then(function() {
-        return cache.get('a');
-      })
-      .then(function(v) { expect(v).to.be.undefined; })
-      .end(done);
+      .then(function() { return cache.get('a'); })
+      .then(function(v) { expect(v).to.be.undefined; });
   });
 
   it('lru recently gotten', function () {
     var cache = new LRU(2 * calcLength('a', 'A'));
-    cache.set('a', 'A');
-    cache.set('b', 'B');
-    cache.get('a');
-    cache.set('c', 'C');
-    expect(cache.get('c')).to.eq('C');
-    expect(cache.get('b')).to.be.undefined;
-    expect(cache.get('a')).to.eq('A');
+
+    return Promise.resolve()
+      .then(function() { return cache.set('a', 'A'); })
+      .then(function() { return cache.set('b', 'B'); })
+      .then(function() { return cache.get('a'); })
+      .then(function() { return cache.set('c', 'C'); })
+
+      .then(function() { return cache.get('c'); })
+      .then(function(v) { expect(v).to.eq('C'); })
+
+      .then(function() { return cache.get('b'); })
+      .then(function(v) { expect(v).to.be.undefined; })
+
+      .then(function() { return cache.get('a'); })
+      .then(function(v) { expect(v).to.eq('A'); });
   });
 
   it('del', function () {
     var cache = new LRU();
-    cache.set('a', 'A');
-    cache.del('a');
-    expect(cache.get('a')).to.be.undefined;
+
+    return Promise
+      .resolve()
+      .then(function() { return cache.set('a', 'A'); })
+      .then(function() { return cache.del('a'); })
+      .then(function() { return cache.get('a'); })
+      .then(function(v) { expect(v).to.be.undefined; });
   });
 
   it('reset', function () {
     var cache = new LRU(10 * calcLength('a', 'A'));
-    cache.set('a', 'A');
-    cache.set('b', 'B');
-    cache.reset();
-    expect(cache.length).to.eq(0);
-    expect(cache.max).to.eq(10 * calcLength('a', 'A'));
-    expect(cache.get('a')).to.be.undefined;
-    expect(cache.get('b')).to.be.undefined;
+
+    return Promise
+      .resolve()
+      .then(function() { return cache.set('a', 'A'); })
+      .then(function() { return cache.set('b', 'B'); })
+      .then(function() { return cache.reset(); })
+      .then(function() { expect(cache.length).to.eq(0); })
+
+      .then(function() { return cache.get('a'); })
+      .then(function(v) { expect(v).to.be.undefined; })
+
+      .then(function() { return cache.get('b'); })
+      .then(function(v) { expect(v).to.be.undefined; });
   });
 
-  it('dump', function () {
-    var cache = new LRU(10 * calcLength('a', 'A'));
-    var d = cache.dump();
-    expect(Object.keys(d).length).to.eq(0);
-    cache.set('a', 'A');
-    d = cache.dump();  // { a: { key: 'a', value: 'A', lu: 0 } }
-    expect(d.a).to.be.ok;
-    expect(d.a.key).to.eq('a');
-    expect(d.a.value).to.eq('A');
-    expect(d.a.lu).to.eq(0);
-
-    cache.set('b', 'B');
-    cache.get('b');
-    d = cache.dump();
-    expect(d.b).to.be.ok;
-    expect(d.b.key).to.eq('b');
-    expect(d.b.value).to.eq('B');
-    expect(d.b.lu).to.eq(2);
-
+  it('item too large', function () {
+    var cache = new LRU(10);
+    return Promise
+      .resolve()
+      .then(function() { return cache.set('key', 'I am too big to fit!!!'); })
+      .catch(function(err) { expect(err.message).to.eq('oversized'); })
+      .then(function() { return cache.get('key'); })
+      .then(function(v) {
+        expect(v).to.be.undefined;
+        expect(cache.length).to.eq(0);
+      });
   });
 
-  it('weighed length item too large', function () {
-    var cache = new LRU(10 * calcLength('a', 'A'));
-
-    expect(cache.max).to.eq(10 * calcLength('a', 'A'));
-
-    // should fall out immediately
-    cache.set('key', {val: 'way to big to fit in the store'});
-
-    expect(cache.length).to.eq(0);
-    expect(cache.get('key')).to.be.undefined;
-  });
-
-  it('least recently set', function () {
-    var cache = new LRU(calcLength('a', 'DDDD') + calcLength('a', 'CCC'));
-    cache.set('a', 'A');
-    cache.set('b', 'BB');
-    cache.set('c', 'CCC');
-    cache.set('d', 'DDDD');
-    expect(cache.get('d')).to.eq('DDDD');
-    expect(cache.get('c')).to.eq('CCC');
-    expect(cache.get('b')).to.be.undefined;
-    expect(cache.get('a')).to.be.undefined;
-  });
-
-  it('lru recently gotten', function () {
-    var max = calcLength('a', 'A') + calcLength('b', 'BB') + calcLength('d', 'DDDD'),
-        cache = new LRU(max);
-
-    cache.set('a', 'A');
-    cache.set('b', 'BB');
-    cache.set('c', 'CCC');
-    cache.get('a');
-    cache.get('b');
-    cache.set('d', 'DDDD');
-    expect(cache.get('c')).to.be.undefined;
-    expect(cache.get('d')).to.eq('DDDD');
-    expect(cache.get('b')).to.eq('BB');
-    expect(cache.get('a')).to.eq('A');
-  });
-
-  it('set returns proper booleans', function() {
-    var cache = new LRU(calcLength('c', 'CCCC'));
-
-    expect(cache.set('a', 'A')).to.be.ok;
-
-    // should return false for max exceeded
-    expect(cache.set('b', 'donuts')).to.not.be.ok;
-
-    expect(cache.set('b', 'B')).to.be.ok;
-    expect(cache.set('c', 'CCCC')).to.be.ok;
-  });
-
-  it('drop the old items', function(done) {
-    this.timeout(2000);
-
+  it('drop the old items', function() {
     var cache = new LRU({
-      max: 5 * calcLength('a', 'A'),
-      maxAge: 250
+      max: 10 * calcLength('a', 'A'),
+      maxAge: 300
     });
 
-    cache.set('a', 'A');
-
-    setTimeout(function () {
-      cache.set('b', 'b');
-      expect(cache.get('a')).to.eq('A');
-    }, 100);
-
-    setTimeout(function () {
-      cache.set('c', 'C');
-      expect(cache.get('a')).to.not.be.ok;
-    }, 400);
-
-    setTimeout(function () {
-      expect(cache.get('b')).to.not.be.ok;
-      expect(cache.get('c')).to.eq('C');
-    }, 500);
-
-    setTimeout(function () {
-      expect(cache.get('c')).to.not.be.ok;
-      done();
-    }, 700);
+    return Promise
+      .resolve()
+      .then(function() { return cache.set('a', 'A'); })
+      .then(wait(200))
+      .then(function() { return cache.get('a'); })
+      .then(function(v) { return expect(v).to.eq('A'); })
+      .then(wait(400))
+      .then(function() { return cache.get('a'); })
+      .then(function(v) { return expect(v).to.be.undefined; });
   });
 
   it('lru update via set', function() {
     var cache = LRU({ max: 2 * calcLength('foo', 1) });
 
-    cache.set('foo', 1);
-    cache.set('bar', 2);
-    cache.del('bar');
-    cache.set('baz', 3);
-    cache.set('qux', 4);
+    return Promise
+      .resolve()
+      .then( function() { return cache.set('foo', 1); })
+      .then( function() { return cache.set('bar', 2); })
+      .then( function() { return cache.del('bar'); })
+      .then( function() { return cache.set('baz', 3); })
+      .then( function() { return cache.set('quz', 4); })
 
-    expect(cache.get('foo')).to.be.undefined;
-    expect(cache.get('bar')).to.be.undefined;
-    expect(cache.get('baz')).to.eq(3);
-    expect(cache.get('qux')).to.eq(4);
+      .then( function() { return cache.get('foo'); })
+      .then( function(v) { expect(v).to.be.undefined; })
+
+      .then( function() { return cache.get('bar'); })
+      .then( function(v) { expect(v).to.be.undefined; })
+
+      .then( function() { return cache.get('baz'); })
+      .then( function(v) { expect(v).to.eq(3); })
+
+      .then( function() { return cache.get('quz'); })
+      .then( function(v) { expect(v).to.eq(4); });
   });
 
   it('least recently set w/ peek', function () {
     var cache = LRU({ max: 2 * calcLength('a', 'A') });
-    cache.set('a', 'A');
-    cache.set('b', 'B');
-    expect(cache.peek('a')).to.eq('A');
-    cache.set('c', 'C');
-    expect(cache.get('c')).to.eq('C');
-    expect(cache.get('b')).to.eq('B');
-    expect(cache.get('a')).to.be.undefined;
+
+    return Promise
+      .resolve()
+      .then( function() { return cache.set('a', 'A'); })
+      .then( function() { return cache.set('b', 'B'); })
+
+      .then( function() { return cache.peek('a'); })
+      .then( function(v) { expect(v).to.eq('A'); })
+
+      .then( function() { return cache.set('c', 'C'); })
+      .then( function() { return cache.get('c'); })
+      .then( function(v) { expect(v).to.eq('C'); })
+
+      .then( function() { return cache.get('b'); })
+      .then( function(v) { expect(v).to.eq('B'); })
+
+      .then( function() { return cache.get('a'); })
+      .then( function(v) { expect(v).to.be.undefined; });
   });
 
-  it('should delete stuff when ls quotas reached', function (done) {
+  it('should delete stuff when ls quotas reached', function () {
     var cache = LRU(),
         bigString = '',
         i = 0;
     for (var j = 0 ; j <= 1000000; j++) bigString += j%9;
 
-    cache.set('first', 'smallstring');
+    return Promise
+      .resolve()
+      .then(function() { return cache.set('first', 'smallstring'); })
 
-    // store stuff in ls
-    while (!localStorage.setItem(i, bigString)) i++;
+      // store stuff in ls until it fails
+      .then(function() {
+        while (!localStorage.setItem(i, bigString)) i++;
+      })
 
-    // ls if full cache will return false
-    expect(cache.set('one-more', bigString)).to.be.ko;
+      .then(function() {
+        return cache.set('one-more', bigString);
+      })
 
-    // remove one
-    localStorage.removeItem(0);
+      .catch(function(err) {
+        expect(err.code).to.eq(DOMException.QUOTA_EXCEEDED_ERR);
+      })
 
-    // we should have free up enough some space for our cache
-    expect(cache.set('one-more', bigString)).to.be.ok;
+      // make some space in ls and try again
+      .then(function() {
+        localStorage.removeItem(0);
+        return cache.set('one-more', bigString);
+      })
 
-    done();
+      .then(function() { return cache.get('one-more'); })
+      .then(function(v) { expect(v).to.eq(bigString); });
   });
 
-});
-
-describe('foreach tests', function () {
-
-  beforeEach(function () {
-    window.localStorage.clear();
-  });
-
-  it('forEach', function () {
-    var l = new LRU(9 * calcLength('1', '1'));
-    var i;
-
-    for (i = 0; i < 10; i ++) {
-      l.set(i.toString(), i.toString(2));
-    }
-
-    i = 9;
-    l.forEach(function (val, key, cache) {
-      expect(cache).to.eq(l);
-      expect(key).to.eq(i.toString());
-      expect(val).to.eq(i.toString(2));
-      i -= 1;
-    });
-
-    // get in order of most recently used
-    l.get(6);
-    l.get(8);
-
-    var order = [ 8, 6, 9, 7, 5 ];
-    i = 0;
-
-    l.forEach(function (val, key, cache) {
-      var j = order[i ++];
-      expect(cache).to.eq(l);
-      expect(key).to.eq(j.toString());
-      expect(val).to.eq(j.toString(2));
-    });
-
-  });
-
-  it('keys() and values()', function () {
+  it('keys()', function () {
 
     var max = calcLength('1', '1001')
             + calcLength('2', '1000')
@@ -299,71 +243,47 @@ describe('foreach tests', function () {
             + calcLength('4', '110')
             + calcLength('5', '101');
 
-    var l = new LRU(max);
-    for (var i = 0; i < 10; i ++) {
-      l.set(i.toString(), i.toString(2));
-    }
+    var cache = new LRU(max);
+    var promises =[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(function(i) {
+      return cache.set(i.toString(), i.toString(2));
+    });
 
-    expect(l.keys()).to.deep.eq(['9', '8', '7', '6', '5']);
-    expect(l.values()).to.deep.eq(['1001', '1000', '111', '110', '101']);
+    return Promise
+      .all(promises)
+      .then(function() {
+        expect(cache.keys()).to.deep.eq(['9', '8', '7', '6', '5']);
+      })
 
-    // get in order of most recently used
-    l.get(6);
-    l.get(8);
-
-    expect(l.keys()).to.deep.eq(['8', '6', '9', '7', '5']);
-    expect(l.values()).to.deep.eq(['1000', '110', '1001', '111', '101']);
+      // get in order of most recently used
+      .then(function() { return cache.get(6); })
+      .then(function() { return cache.get(8); })
+      .then(function() {
+        expect(cache.keys()).to.deep.eq(['8', '6', '9', '7', '5']);
+      });
 
   });
+
 });
 
-describe('reload tests', function () {
+describe('when reloading', function () {
 
-  beforeEach(function () {
-    window.localStorage.clear();
-  });
-
-  it('basic', function () {
-    // set a value
+  before(function() {
     var cache = new LRU(calcLength('key', 'value'));
-    cache.set('key', 'value');
-
-    // recreate cache with ls
-    cache = new LRU(calcLength('key', 'value'));
-
-    expect(cache.get('key')).to.eq('value');
-    expect(cache.get('nada')).to.be.undefined;
-    expect(cache.length).to.eq(calcLength('key', 'value'));
-    expect(cache.max).to.eq(10);
+    return cache.set('key', 'value')
   });
 
-  it('least recently set', function () {
-    var cache = new LRU(2 * calcLength('a', 'A'));
-    cache.set('a', 'A');
-    cache.set('b', 'B');
-    cache.set('c', 'C');
+  it('should retrieve existing values', function () {
+    var cache = new LRU(calcLength('key', 'value'));
 
-    // recreate cache with ls
-    cache = new LRU(2 * calcLength('a', 'A'));
-
-    expect(cache.get('c')).to.eq('C');
-    expect(cache.get('b')).to.eq('B');
-    expect(cache.get('a')).to.be.undefined;
+    return cache
+      .load()
+      .then(function() {
+        return cache.get('key');
+      })
+      .then(function(v) {
+        expect(v).to.eq('value');
+        expect(cache.length).to.eq(calcLength('key', 'value'));
+      });
   });
-
-  it('lru recently gotten', function () {
-    var cache = new LRU(2 * calcLength('a', 'A'));
-    cache.set('a', 'A');
-    cache.set('b', 'B');
-    cache.get('a');
-    cache.set('c', 'C');
-
-    // recreate cache with ls
-    cache = new LRU(2 * calcLength('a', 'A'));
-
-    expect(cache.get('c')).to.eq('C');
-    expect(cache.get('b')).to.be.undefined;
-    expect(cache.get('a')).to.eq('A');
-  });
-
 });
+
