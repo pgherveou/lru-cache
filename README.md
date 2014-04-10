@@ -53,9 +53,6 @@ if no size is specified the cache will keep adding items until the max size of t
 
 ## API
 
-* `set(key, value)`
-* `get(key)`
-
 ### get
 update the "recently used"-ness of the key, and returns a promise of the key value.
 
