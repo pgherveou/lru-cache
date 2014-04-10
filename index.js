@@ -46,7 +46,6 @@ Store.prototype.save = function(val, cb) {
   return this.setItem('', val, cb);
 };
 
-
 /**
  * Entry Class
  * container for lru items
@@ -357,7 +356,7 @@ function LRUCache (options) {
         if (!hit) return;
         if (maxAge && (hit.getAge() > maxAge)) return del(hit);
         if (doUse) use(hit);
-        return hit.value;
+        return hit;
       });
   }
 
@@ -428,6 +427,21 @@ function LRUCache (options) {
   };
 
   /**
+   * get an entry in the cache
+   * update the recent-ness
+   *
+   * @param  {String} key
+   * @return {Entry}
+   */
+
+  this.getEntry = function (key) {
+    return get(key, true).then(function(v) {
+      if (v) cache.update();
+      return v;
+    });
+  };
+
+  /**
    * get a key in the cache
    * update the recent-ness
    *
@@ -436,21 +450,12 @@ function LRUCache (options) {
    */
 
   this.get = function (key) {
-    return get(key, true).then(function(v) {
-      cache.update();
-      return v;
+    return get(key, true).then(function(hit) {
+      if (hit) {
+        cache.update();
+        return hit.value;
+      }
     });
-  };
-
-  /**
-   * get key Entry
-   *
-   * @param  {String} key
-   * @return {Promise}
-   */
-
-  this.getEntry = function (key) {
-    return cache.get(key);
   };
 
   /**
@@ -461,15 +466,9 @@ function LRUCache (options) {
    */
 
   this.peek = function (key) {
-    return get(key, false);
-  };
-
-  /**
-   * dump cache
-   */
-
-  this.dump = function () {
-    return cache.items;
+    return get(key, false).then(function(hit) {
+      if (hit) return hit.value;
+    });
   };
 
   /**
@@ -484,6 +483,12 @@ function LRUCache (options) {
       cache.update();
     });
   };
+
+  /**
+   * load cache from storage
+   *
+   * @return {Promise}
+   */
 
   this.load = function() {
     return cache.store
