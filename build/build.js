@@ -6021,7 +6021,6 @@ Store.prototype.save = function(val, cb) {\n\
   return this.setItem('', val, cb);\n\
 };\n\
 \n\
-\n\
 /**\n\
  * Entry Class\n\
  * container for lru items\n\
@@ -6332,7 +6331,7 @@ function LRUCache (options) {\n\
         if (!hit) return;\n\
         if (maxAge && (hit.getAge() > maxAge)) return del(hit);\n\
         if (doUse) use(hit);\n\
-        return hit.value;\n\
+        return hit;\n\
       });\n\
   }\n\
 \n\
@@ -6403,6 +6402,21 @@ function LRUCache (options) {\n\
   };\n\
 \n\
   /**\n\
+   * get an entry in the cache\n\
+   * update the recent-ness\n\
+   *\n\
+   * @param  {String} key\n\
+   * @return {Entry}\n\
+   */\n\
+\n\
+  this.getEntry = function (key) {\n\
+    return get(key, true).then(function(v) {\n\
+      if (v) cache.update();\n\
+      return v;\n\
+    });\n\
+  };\n\
+\n\
+  /**\n\
    * get a key in the cache\n\
    * update the recent-ness\n\
    *\n\
@@ -6411,21 +6425,12 @@ function LRUCache (options) {\n\
    */\n\
 \n\
   this.get = function (key) {\n\
-    return get(key, true).then(function(v) {\n\
-      cache.update();\n\
-      return v;\n\
+    return get(key, true).then(function(hit) {\n\
+      if (hit) {\n\
+        cache.update();\n\
+        return hit.value;\n\
+      }\n\
     });\n\
-  };\n\
-\n\
-  /**\n\
-   * get key Entry\n\
-   *\n\
-   * @param  {String} key\n\
-   * @return {Promise}\n\
-   */\n\
-\n\
-  this.getEntry = function (key) {\n\
-    return cache.get(key);\n\
   };\n\
 \n\
   /**\n\
@@ -6436,15 +6441,9 @@ function LRUCache (options) {\n\
    */\n\
 \n\
   this.peek = function (key) {\n\
-    return get(key, false);\n\
-  };\n\
-\n\
-  /**\n\
-   * dump cache\n\
-   */\n\
-\n\
-  this.dump = function () {\n\
-    return cache.items;\n\
+    return get(key, false).then(function(hit) {\n\
+      if (hit) return hit.value;\n\
+    });\n\
   };\n\
 \n\
   /**\n\
@@ -6459,6 +6458,12 @@ function LRUCache (options) {\n\
       cache.update();\n\
     });\n\
   };\n\
+\n\
+  /**\n\
+   * load cache from storage\n\
+   *\n\
+   * @return {Promise}\n\
+   */\n\
 \n\
   this.load = function() {\n\
     return cache.store\n\
