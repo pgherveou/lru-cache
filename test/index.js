@@ -24,10 +24,6 @@ function wait(time) {
   };
 }
 
-function calcLength(key ,val) {
-  return key.length + (JSON.stringify(val)).length;
-}
-
 afterEach(function () {
   return lf.clear();
 });
@@ -35,7 +31,7 @@ afterEach(function () {
 describe('basic tests', function () {
 
   it('basic', function () {
-    var cache = new LRU(calcLength('key', 'value'));
+    var cache = new LRU();
 
     var p1 = cache
       .set('key', 'value')
@@ -55,13 +51,12 @@ describe('basic tests', function () {
     return Promise
       .all([p1, p2])
       .then(function() {
-        expect(cache.length).to.eq(calcLength('key', 'value'));
-        expect(cache.max).to.eq(10);
+        expect(cache.length).to.eq(1);
       });
   });
 
   it('least recently set', function () {
-    var cache = new LRU(2 * calcLength('a', 'A'));
+    var cache = new LRU(2);
 
     return Promise.resolve()
       .then(function() { return cache.set('a', 'A'); })
@@ -79,7 +74,7 @@ describe('basic tests', function () {
   });
 
   it('lru recently gotten', function () {
-    var cache = new LRU(2 * calcLength('a', 'A'));
+    var cache = new LRU(2);
 
     return Promise.resolve()
       .then(function() { return cache.set('a', 'A'); })
@@ -109,7 +104,7 @@ describe('basic tests', function () {
   });
 
   it('reset', function () {
-    var cache = new LRU(10 * calcLength('a', 'A'));
+    var cache = new LRU(10);
 
     return Promise
       .resolve()
@@ -126,7 +121,13 @@ describe('basic tests', function () {
   });
 
   it('item too large', function () {
-    var cache = new LRU(10);
+    var cache = new LRU({
+      max: 10,
+      length: function strLength(key, value) {
+        return key.length + value.length;
+      }
+    });
+
     return Promise
       .resolve()
       .then(function() { return cache.set('key', 'I am too big to fit!!!'); })
@@ -139,10 +140,7 @@ describe('basic tests', function () {
   });
 
   it('drop the old items', function() {
-    var cache = new LRU({
-      max: 10 * calcLength('a', 'A'),
-      maxAge: 300
-    });
+    var cache = new LRU({ maxAge: 300 });
 
     return Promise
       .resolve()
@@ -156,7 +154,7 @@ describe('basic tests', function () {
   });
 
   it('lru update via set', function() {
-    var cache = LRU({ max: 2 * calcLength('foo', 1) });
+    var cache = LRU({ max: 2 });
 
     return Promise
       .resolve()
@@ -180,7 +178,7 @@ describe('basic tests', function () {
   });
 
   it('least recently set w/ peek', function () {
-    var cache = LRU({ max: 2 * calcLength('a', 'A') });
+    var cache = LRU({ max: 2 });
 
     return Promise
       .resolve()
@@ -202,9 +200,10 @@ describe('basic tests', function () {
   });
 
   it('should delete stuff when ls quotas reached', function () {
-    var cache = LRU(),
+    var cache = LRU({ max: Math.Infinity }),
         bigString = '',
         i = 0;
+
     for (var j = 0 ; j <= 1000000; j++) bigString += j%9;
 
     return Promise
@@ -235,14 +234,8 @@ describe('basic tests', function () {
   });
 
   it('keys()', function () {
+    var cache = new LRU({ max: 5 });
 
-    var max = calcLength('1', '1001')
-            + calcLength('2', '1000')
-            + calcLength('3', '111')
-            + calcLength('4', '110')
-            + calcLength('5', '101');
-
-    var cache = new LRU(max);
     var promises =[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(function(i) {
       return cache.set(i.toString(), i.toString(2));
     });
@@ -267,12 +260,12 @@ describe('basic tests', function () {
 describe('when reloading', function () {
 
   before(function() {
-    var cache = new LRU(calcLength('key', 'value'));
+    var cache = new LRU();
     return cache.set('key', 'value');
   });
 
   it('should retrieve existing values', function () {
-    var cache = new LRU(calcLength('key', 'value'));
+    var cache = new LRU();
 
     return cache
       .load()
@@ -281,7 +274,7 @@ describe('when reloading', function () {
       })
       .then(function(v) {
         expect(v).to.eq('value');
-        expect(cache.length).to.eq(calcLength('key', 'value'));
+        expect(cache.length).to.eq(1);
       });
   });
 });

@@ -2,7 +2,13 @@ var lf = require('localforage'),
     Promise = window.Promise;
 
 // max size if not specifed
-var MAX_SIZE = 5000000;
+var MAX_SIZE = 100;
+
+function naiveLength () { return 1; }
+
+// function strLength(key, value) {
+//   return key.toString().length + JSON.stringify(value || null).length;
+// };
 
 /**
  * hasOwnProperty alias
@@ -51,12 +57,12 @@ Store.prototype.save = function(val, cb) {
  * container for lru items
  */
 
-function Entry (key, value, lu, age, loaded) {
+function Entry (key, value, lu, length, age, loaded) {
   this.key = key;
   this.value = value;
   this.lu = lu;
   this.age = age;
-  this.length = key.toString().length + JSON.stringify(value || null).length;
+  this.length = length;
   this.loaded = loaded;
 }
 
@@ -206,15 +212,10 @@ function LRUCache (options) {
   if (typeof options === 'number') options = { max: options };
   if (!options) options = {};
 
-  // options
-  var max = options.max,
-      maxAge = options.maxAge || null;
-
-  // a little bit silly.  maybe this should throw?
-  if (!max || ('number' !== typeof max) || max <= 0 ) max = MAX_SIZE;
-
-  // states
   var cache = new Cache(options.name),
+      max = options.max || MAX_SIZE,
+      maxAge = options.maxAge || null,
+      lengthCalculator = options.length || naiveLength,
       mru = 0, // most recently used
       lru = 0, // least recently used
       length = 0, // number of items in the list
@@ -370,8 +371,9 @@ function LRUCache (options) {
    */
 
   this.set = function (key, value) {
-    var age = maxAge ? Date.now() : 0;
-    var hit = new Entry(key, value, mru++, age, true);
+    var age = maxAge ? Date.now() : 0,
+        len = lengthCalculator(key, value),
+        hit = new Entry(key, value, mru++, len, age, true);
 
     // oversized objects fall out of cache automatically.
     if (hit.length > max) return Promise.reject(new Error('oversized'));
@@ -499,7 +501,7 @@ function LRUCache (options) {
 
         // init cache items
         items.forEach(function (obj) {
-          var entry = new Entry (obj.key, null, obj.lu, obj.age);
+          var entry = new Entry (obj.key, null, obj.lu, obj.length, obj.age);
           entry.length = obj.length;
           cache.items[obj.key] = entry;
           cache.list[entry.lu] = entry;

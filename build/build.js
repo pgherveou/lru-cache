@@ -5977,7 +5977,13 @@ require.register("lru-cache/index.js", Function("exports, require, module",
     Promise = window.Promise;\n\
 \n\
 // max size if not specifed\n\
-var MAX_SIZE = 5000000;\n\
+var MAX_SIZE = 100;\n\
+\n\
+function naiveLength () { return 1; }\n\
+\n\
+// function strLength(key, value) {\n\
+//   return key.toString().length + JSON.stringify(value || null).length;\n\
+// };\n\
 \n\
 /**\n\
  * hasOwnProperty alias\n\
@@ -6026,12 +6032,12 @@ Store.prototype.save = function(val, cb) {\n\
  * container for lru items\n\
  */\n\
 \n\
-function Entry (key, value, lu, age, loaded) {\n\
+function Entry (key, value, lu, length, age, loaded) {\n\
   this.key = key;\n\
   this.value = value;\n\
   this.lu = lu;\n\
   this.age = age;\n\
-  this.length = key.toString().length + JSON.stringify(value || null).length;\n\
+  this.length = length;\n\
   this.loaded = loaded;\n\
 }\n\
 \n\
@@ -6181,15 +6187,10 @@ function LRUCache (options) {\n\
   if (typeof options === 'number') options = { max: options };\n\
   if (!options) options = {};\n\
 \n\
-  // options\n\
-  var max = options.max,\n\
-      maxAge = options.maxAge || null;\n\
-\n\
-  // a little bit silly.  maybe this should throw?\n\
-  if (!max || ('number' !== typeof max) || max <= 0 ) max = MAX_SIZE;\n\
-\n\
-  // states\n\
   var cache = new Cache(options.name),\n\
+      max = options.max || MAX_SIZE,\n\
+      maxAge = options.maxAge || null,\n\
+      lengthCalculator = options.length || naiveLength,\n\
       mru = 0, // most recently used\n\
       lru = 0, // least recently used\n\
       length = 0, // number of items in the list\n\
@@ -6345,8 +6346,9 @@ function LRUCache (options) {\n\
    */\n\
 \n\
   this.set = function (key, value) {\n\
-    var age = maxAge ? Date.now() : 0;\n\
-    var hit = new Entry(key, value, mru++, age, true);\n\
+    var age = maxAge ? Date.now() : 0,\n\
+        len = lengthCalculator(key, value),\n\
+        hit = new Entry(key, value, mru++, len, age, true);\n\
 \n\
     // oversized objects fall out of cache automatically.\n\
     if (hit.length > max) return Promise.reject(new Error('oversized'));\n\
@@ -6474,7 +6476,7 @@ function LRUCache (options) {\n\
 \n\
         // init cache items\n\
         items.forEach(function (obj) {\n\
-          var entry = new Entry (obj.key, null, obj.lu, obj.age);\n\
+          var entry = new Entry (obj.key, null, obj.lu, obj.length, obj.age);\n\
           entry.length = obj.length;\n\
           cache.items[obj.key] = entry;\n\
           cache.list[entry.lu] = entry;\n\
