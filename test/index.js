@@ -270,12 +270,19 @@ describe('when reloading', function () {
     return cache
       .load()
       .then(function() {
-        return cache.get('key');
+        return cache.getEntry('key');
       })
-      .then(function(v) {
-        expect(v).to.eq('value');
+      .then(function(hit) {
+        expect(hit.key).to.eq('key');
+        expect(hit.value).to.eq('value');
+        expect(hit.lu).to.eq(0);
+        expect(hit.age).to.eq(0);
         expect(cache.length).to.eq(1);
       });
   });
+
+
+
+
 });
 

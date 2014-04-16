@@ -101,9 +101,9 @@ Cache.prototype.update = function () {
 
   // serialize entries
   entries = Object
-    .keys(this.list)
+    .keys(this.items)
     .map(function (key) {
-      var item = this.list[key];
+      var item = this.items[key];
       return {
         key: item.key,
         age: item.age,
