@@ -373,10 +373,17 @@ function LRUCache (options) {
   this.set = function (key, value) {
     var age = maxAge ? Date.now() : 0,
         len = lengthCalculator(key, value),
-        hit = new Entry(key, value, mru++, len, age, true);
+        hit = new Entry(key, value, mru++, len, age, true),
+        prev = cache.items[key];
 
     // oversized objects fall out of cache automatically.
     if (hit.length > max) return Promise.reject(new Error('oversized'));
+
+    if (prev) {
+      length -= prev.length;
+      delete cache.items[prev.key];
+      delete cache.list[prev.lu];
+    }
 
     // trim and retry until it works
     function retry() {
