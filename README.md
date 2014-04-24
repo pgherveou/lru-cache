@@ -1,7 +1,7 @@
 # lru cache
 
 A Browser cache object that deletes the least-recently-used items.
-and use [localforage](https://github.com/mozilla/node-lru-cache) as storage.
+and use [localforage](https://github.com/mozilla/localForage) as storage.
 
 The code is forked and adapted from [node-lru-cache](https://github.com/isaacs/node-lru-cache)
 
