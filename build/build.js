@@ -1,39 +1,19 @@
-
 /**
- * Require the given path.
+ * Require the module at `name`.
  *
- * @param {String} path
+ * @param {String} name
  * @return {Object} exports
  * @api public
  */
 
-function require(path, parent, orig) {
-  var resolved = require.resolve(path);
+function require(name) {
+  var module = require.modules[name];
+  if (!module) throw new Error('failed to require "' + name + '"');
 
-  // lookup failed
-  if (null == resolved) {
-    orig = orig || path;
-    parent = parent || 'root';
-    var err = new Error('Failed to require "' + orig + '" from "' + parent + '"');
-    err.path = orig;
-    err.parent = parent;
-    err.require = true;
-    throw err;
-  }
-
-  var module = require.modules[resolved];
-
-  // perform real require()
-  // by invoking the module's
-  // registered function
-  if (!module._resolving && !module.exports) {
-    var mod = {};
-    mod.exports = {};
-    mod.client = mod.component = true;
-    module._resolving = true;
-    module.call(this, mod.exports, require.relative(resolved), mod);
-    delete module._resolving;
-    module.exports = mod.exports;
+  if (!('exports' in module) && typeof module.definition === 'function') {
+    module.client = module.component = true;
+    module.definition.call(this, module.exports = {}, module);
+    delete module.definition;
   }
 
   return module.exports;
@@ -46,165 +26,469 @@ function require(path, parent, orig) {
 require.modules = {};
 
 /**
- * Registered aliases.
- */
-
-require.aliases = {};
-
-/**
- * Resolve `path`.
+ * Register module at `name` with callback `definition`.
  *
- * Lookup:
- *
- *   - PATH/index.js
- *   - PATH.js
- *   - PATH
- *
- * @param {String} path
- * @return {String} path or null
- * @api private
- */
-
-require.resolve = function(path) {
-  if (path.charAt(0) === '/') path = path.slice(1);
-
-  var paths = [
-    path,
-    path + '.js',
-    path + '.json',
-    path + '/index.js',
-    path + '/index.json'
-  ];
-
-  for (var i = 0; i < paths.length; i++) {
-    var path = paths[i];
-    if (require.modules.hasOwnProperty(path)) return path;
-    if (require.aliases.hasOwnProperty(path)) return require.aliases[path];
-  }
-};
-
-/**
- * Normalize `path` relative to the current path.
- *
- * @param {String} curr
- * @param {String} path
- * @return {String}
- * @api private
- */
-
-require.normalize = function(curr, path) {
-  var segs = [];
-
-  if ('.' != path.charAt(0)) return path;
-
-  curr = curr.split('/');
-  path = path.split('/');
-
-  for (var i = 0; i < path.length; ++i) {
-    if ('..' == path[i]) {
-      curr.pop();
-    } else if ('.' != path[i] && '' != path[i]) {
-      segs.push(path[i]);
-    }
-  }
-
-  return curr.concat(segs).join('/');
-};
-
-/**
- * Register module at `path` with callback `definition`.
- *
- * @param {String} path
+ * @param {String} name
  * @param {Function} definition
  * @api private
  */
 
-require.register = function(path, definition) {
-  require.modules[path] = definition;
+require.register = function (name, definition) {
+  require.modules[name] = {
+    definition: definition
+  };
 };
 
 /**
- * Alias a module definition.
+ * Define a module's exports immediately with `exports`.
  *
- * @param {String} from
- * @param {String} to
+ * @param {String} name
+ * @param {Generic} exports
  * @api private
  */
 
-require.alias = function(from, to) {
-  if (!require.modules.hasOwnProperty(from)) {
-    throw new Error('Failed to alias "' + from + '", it does not exist');
-  }
-  require.aliases[to] = from;
-};
-
-/**
- * Return a require function relative to the `parent` path.
- *
- * @param {String} parent
- * @return {Function}
- * @api private
- */
-
-require.relative = function(parent) {
-  var p = require.normalize(parent, '..');
-
-  /**
-   * lastIndexOf helper.
-   */
-
-  function lastIndexOf(arr, obj) {
-    var i = arr.length;
-    while (i--) {
-      if (arr[i] === obj) return i;
-    }
-    return -1;
-  }
-
-  /**
-   * The relative require() itself.
-   */
-
-  function localRequire(path) {
-    var resolved = localRequire.resolve(path);
-    return require(resolved, parent, path);
-  }
-
-  /**
-   * Resolve relative to the parent.
-   */
-
-  localRequire.resolve = function(path) {
-    var c = path.charAt(0);
-    if ('/' == c) return path.slice(1);
-    if ('.' == c) return require.normalize(p, path);
-
-    // resolve deps by returning
-    // the dep in the nearest "deps"
-    // directory
-    var segs = parent.split('/');
-    var i = lastIndexOf(segs, 'deps') + 1;
-    if (!i) i = 0;
-    path = segs.slice(0, i + 1).join('/') + '/deps/' + path;
-    return path;
+require.define = function (name, exports) {
+  require.modules[name] = {
+    exports: exports
   };
-
-  /**
-   * Check if module is defined at `path`.
-   */
-
-  localRequire.exists = function(path) {
-    return require.modules.hasOwnProperty(localRequire.resolve(path));
-  };
-
-  return localRequire;
 };
-require.register("pgherveou-localforage/src/localforage.js", Function("exports, require, module",
+require.register("johntron~asap@master", Function("exports, module",
+"\"use strict\";\n\
+\n\
+// Use the fastest possible means to execute a task in a future turn\n\
+// of the event loop.\n\
+\n\
+// linked list of tasks (single, with head node)\n\
+var head = {task: void 0, next: null};\n\
+var tail = head;\n\
+var flushing = false;\n\
+var requestFlush = void 0;\n\
+var hasSetImmediate = typeof setImmediate === \"function\";\n\
+var domain;\n\
+\n\
+if (typeof global != 'undefined') {\n\
+\t// Avoid shims from browserify.\n\
+\t// The existence of `global` in browsers is guaranteed by browserify.\n\
+\tvar process = global.process;\n\
+}\n\
+\n\
+// Note that some fake-Node environments,\n\
+// like the Mocha test runner, introduce a `process` global.\n\
+var isNodeJS = !!process && ({}).toString.call(process) === \"[object process]\";\n\
+\n\
+function flush() {\n\
+    /* jshint loopfunc: true */\n\
+\n\
+    while (head.next) {\n\
+        head = head.next;\n\
+        var task = head.task;\n\
+        head.task = void 0;\n\
+\n\
+        try {\n\
+            task();\n\
+\n\
+        } catch (e) {\n\
+            if (isNodeJS) {\n\
+                // In node, uncaught exceptions are considered fatal errors.\n\
+                // Re-throw them to interrupt flushing!\n\
+\n\
+                // Ensure continuation if an uncaught exception is suppressed\n\
+                // listening process.on(\"uncaughtException\") or domain(\"error\").\n\
+                requestFlush();\n\
+\n\
+                throw e;\n\
+\n\
+            } else {\n\
+                // In browsers, uncaught exceptions are not fatal.\n\
+                // Re-throw them asynchronously to avoid slow-downs.\n\
+                setTimeout(function () {\n\
+                    throw e;\n\
+                }, 0);\n\
+            }\n\
+        }\n\
+    }\n\
+\n\
+    flushing = false;\n\
+}\n\
+\n\
+if (isNodeJS) {\n\
+    // Node.js\n\
+    requestFlush = function () {\n\
+        // Ensure flushing is not bound to any domain.\n\
+        var currentDomain = process.domain;\n\
+        if (currentDomain) {\n\
+            domain = domain || (1,require)(\"domain\");\n\
+            domain.active = process.domain = null;\n\
+        }\n\
+\n\
+        // Avoid tick recursion - use setImmediate if it exists.\n\
+        if (flushing && hasSetImmediate) {\n\
+            setImmediate(flush);\n\
+        } else {\n\
+            process.nextTick(flush);\n\
+        }\n\
+\n\
+        if (currentDomain) {\n\
+            domain.active = process.domain = currentDomain;\n\
+        }\n\
+    };\n\
+\n\
+} else if (hasSetImmediate) {\n\
+    // In IE10, or https://github.com/NobleJS/setImmediate\n\
+    requestFlush = function () {\n\
+        setImmediate(flush);\n\
+    };\n\
+\n\
+} else if (typeof MessageChannel !== \"undefined\") {\n\
+    // modern browsers\n\
+    // http://www.nonblocking.io/2011/06/windownexttick.html\n\
+    var channel = new MessageChannel();\n\
+    // At least Safari Version 6.0.5 (8536.30.1) intermittently cannot create\n\
+    // working message ports the first time a page loads.\n\
+    channel.port1.onmessage = function () {\n\
+        requestFlush = requestPortFlush;\n\
+        channel.port1.onmessage = flush;\n\
+        flush();\n\
+    };\n\
+    var requestPortFlush = function () {\n\
+        // Opera requires us to provide a message payload, regardless of\n\
+        // whether we use it.\n\
+        channel.port2.postMessage(0);\n\
+    };\n\
+    requestFlush = function () {\n\
+        setTimeout(flush, 0);\n\
+        requestPortFlush();\n\
+    };\n\
+\n\
+} else {\n\
+    // old browsers\n\
+    requestFlush = function () {\n\
+        setTimeout(flush, 0);\n\
+    };\n\
+}\n\
+\n\
+function asap(task) {\n\
+    if (isNodeJS && process.domain) {\n\
+        task = process.domain.bind(task);\n\
+    }\n\
+\n\
+    tail = tail.next = {task: task, next: null};\n\
+\n\
+    if (!flushing) {\n\
+        requestFlush();\n\
+        flushing = true;\n\
+    }\n\
+};\n\
+\n\
+module.exports = asap;\n\
+\n\
+//# sourceURL=components/johntron/asap/master/asap.js"
+));
+
+require.modules["johntron-asap"] = require.modules["johntron~asap@master"];
+require.modules["johntron~asap"] = require.modules["johntron~asap@master"];
+require.modules["asap"] = require.modules["johntron~asap@master"];
+
+
+require.register("then~promise@4.0.0", Function("exports, module",
+"'use strict';\n\
+\n\
+//This file contains then/promise specific extensions to the core promise API\n\
+\n\
+var Promise = require(\"then~promise@4.0.0/core.js\")\n\
+var asap = require(\"johntron~asap@master\")\n\
+\n\
+module.exports = Promise\n\
+\n\
+/* Static Functions */\n\
+\n\
+function ValuePromise(value) {\n\
+  this.then = function (onFulfilled) {\n\
+    if (typeof onFulfilled !== 'function') return this\n\
+    return new Promise(function (resolve, reject) {\n\
+      asap(function () {\n\
+        try {\n\
+          resolve(onFulfilled(value))\n\
+        } catch (ex) {\n\
+          reject(ex);\n\
+        }\n\
+      })\n\
+    })\n\
+  }\n\
+}\n\
+ValuePromise.prototype = Object.create(Promise.prototype)\n\
+\n\
+var TRUE = new ValuePromise(true)\n\
+var FALSE = new ValuePromise(false)\n\
+var NULL = new ValuePromise(null)\n\
+var UNDEFINED = new ValuePromise(undefined)\n\
+var ZERO = new ValuePromise(0)\n\
+var EMPTYSTRING = new ValuePromise('')\n\
+\n\
+Promise.from = Promise.cast = function (value) {\n\
+  if (value instanceof Promise) return value\n\
+\n\
+  if (value === null) return NULL\n\
+  if (value === undefined) return UNDEFINED\n\
+  if (value === true) return TRUE\n\
+  if (value === false) return FALSE\n\
+  if (value === 0) return ZERO\n\
+  if (value === '') return EMPTYSTRING\n\
+\n\
+  if (typeof value === 'object' || typeof value === 'function') {\n\
+    try {\n\
+      var then = value.then\n\
+      if (typeof then === 'function') {\n\
+        return new Promise(then.bind(value))\n\
+      }\n\
+    } catch (ex) {\n\
+      return new Promise(function (resolve, reject) {\n\
+        reject(ex)\n\
+      })\n\
+    }\n\
+  }\n\
+\n\
+  return new ValuePromise(value)\n\
+}\n\
+Promise.denodeify = function (fn, argumentCount) {\n\
+  argumentCount = argumentCount || Infinity\n\
+  return function () {\n\
+    var self = this\n\
+    var args = Array.prototype.slice.call(arguments)\n\
+    return new Promise(function (resolve, reject) {\n\
+      while (args.length && args.length > argumentCount) {\n\
+        args.pop()\n\
+      }\n\
+      args.push(function (err, res) {\n\
+        if (err) reject(err)\n\
+        else resolve(res)\n\
+      })\n\
+      fn.apply(self, args)\n\
+    })\n\
+  }\n\
+}\n\
+Promise.nodeify = function (fn) {\n\
+  return function () {\n\
+    var args = Array.prototype.slice.call(arguments)\n\
+    var callback = typeof args[args.length - 1] === 'function' ? args.pop() : null\n\
+    try {\n\
+      return fn.apply(this, arguments).nodeify(callback)\n\
+    } catch (ex) {\n\
+      if (callback === null || typeof callback == 'undefined') {\n\
+        return new Promise(function (resolve, reject) { reject(ex) })\n\
+      } else {\n\
+        asap(function () {\n\
+          callback(ex)\n\
+        })\n\
+      }\n\
+    }\n\
+  }\n\
+}\n\
+\n\
+Promise.all = function () {\n\
+  var args = Array.prototype.slice.call(arguments.length === 1 && Array.isArray(arguments[0]) ? arguments[0] : arguments)\n\
+\n\
+  return new Promise(function (resolve, reject) {\n\
+    if (args.length === 0) return resolve([])\n\
+    var remaining = args.length\n\
+    function res(i, val) {\n\
+      try {\n\
+        if (val && (typeof val === 'object' || typeof val === 'function')) {\n\
+          var then = val.then\n\
+          if (typeof then === 'function') {\n\
+            then.call(val, function (val) { res(i, val) }, reject)\n\
+            return\n\
+          }\n\
+        }\n\
+        args[i] = val\n\
+        if (--remaining === 0) {\n\
+          resolve(args);\n\
+        }\n\
+      } catch (ex) {\n\
+        reject(ex)\n\
+      }\n\
+    }\n\
+    for (var i = 0; i < args.length; i++) {\n\
+      res(i, args[i])\n\
+    }\n\
+  })\n\
+}\n\
+\n\
+/* Prototype Methods */\n\
+\n\
+Promise.prototype.done = function (onFulfilled, onRejected) {\n\
+  var self = arguments.length ? this.then.apply(this, arguments) : this\n\
+  self.then(null, function (err) {\n\
+    asap(function () {\n\
+      throw err\n\
+    })\n\
+  })\n\
+}\n\
+\n\
+Promise.prototype.nodeify = function (callback) {\n\
+  if (callback === null || typeof callback == 'undefined') return this\n\
+\n\
+  this.then(function (value) {\n\
+    asap(function () {\n\
+      callback(null, value)\n\
+    })\n\
+  }, function (err) {\n\
+    asap(function () {\n\
+      callback(err)\n\
+    })\n\
+  })\n\
+}\n\
+\n\
+Promise.prototype.catch = function (onRejected) {\n\
+  return this.then(null, onRejected);\n\
+}\n\
+\n\
+\n\
+Promise.resolve = function (value) {\n\
+  return new Promise(function (resolve) { \n\
+    resolve(value);\n\
+  });\n\
+}\n\
+\n\
+Promise.reject = function (value) {\n\
+  return new Promise(function (resolve, reject) { \n\
+    reject(value);\n\
+  });\n\
+}\n\
+\n\
+Promise.race = function (values) {\n\
+  return new Promise(function (resolve, reject) { \n\
+    values.map(function(value){\n\
+      Promise.cast(value).then(resolve, reject);\n\
+    })\n\
+  });\n\
+}\n\
+\n\
+//# sourceURL=components/then/promise/4.0.0/index.js"
+));
+
+require.register("then~promise@4.0.0/core.js", Function("exports, module",
+"'use strict';\n\
+\n\
+var asap = require(\"johntron~asap@master\")\n\
+\n\
+module.exports = Promise\n\
+function Promise(fn) {\n\
+  if (typeof this !== 'object') throw new TypeError('Promises must be constructed via new')\n\
+  if (typeof fn !== 'function') throw new TypeError('not a function')\n\
+  var state = null\n\
+  var value = null\n\
+  var deferreds = []\n\
+  var self = this\n\
+\n\
+  this.then = function(onFulfilled, onRejected) {\n\
+    return new Promise(function(resolve, reject) {\n\
+      handle(new Handler(onFulfilled, onRejected, resolve, reject))\n\
+    })\n\
+  }\n\
+\n\
+  function handle(deferred) {\n\
+    if (state === null) {\n\
+      deferreds.push(deferred)\n\
+      return\n\
+    }\n\
+    asap(function() {\n\
+      var cb = state ? deferred.onFulfilled : deferred.onRejected\n\
+      if (cb === null) {\n\
+        (state ? deferred.resolve : deferred.reject)(value)\n\
+        return\n\
+      }\n\
+      var ret\n\
+      try {\n\
+        ret = cb(value)\n\
+      }\n\
+      catch (e) {\n\
+        deferred.reject(e)\n\
+        return\n\
+      }\n\
+      deferred.resolve(ret)\n\
+    })\n\
+  }\n\
+\n\
+  function resolve(newValue) {\n\
+    try { //Promise Resolution Procedure: https://github.com/promises-aplus/promises-spec#the-promise-resolution-procedure\n\
+      if (newValue === self) throw new TypeError('A promise cannot be resolved with itself.')\n\
+      if (newValue && (typeof newValue === 'object' || typeof newValue === 'function')) {\n\
+        var then = newValue.then\n\
+        if (typeof then === 'function') {\n\
+          doResolve(then.bind(newValue), resolve, reject)\n\
+          return\n\
+        }\n\
+      }\n\
+      state = true\n\
+      value = newValue\n\
+      finale()\n\
+    } catch (e) { reject(e) }\n\
+  }\n\
+\n\
+  function reject(newValue) {\n\
+    state = false\n\
+    value = newValue\n\
+    finale()\n\
+  }\n\
+\n\
+  function finale() {\n\
+    for (var i = 0, len = deferreds.length; i < len; i++)\n\
+      handle(deferreds[i])\n\
+    deferreds = null\n\
+  }\n\
+\n\
+  doResolve(fn, resolve, reject)\n\
+}\n\
+\n\
+\n\
+function Handler(onFulfilled, onRejected, resolve, reject){\n\
+  this.onFulfilled = typeof onFulfilled === 'function' ? onFulfilled : null\n\
+  this.onRejected = typeof onRejected === 'function' ? onRejected : null\n\
+  this.resolve = resolve\n\
+  this.reject = reject\n\
+}\n\
+\n\
+/**\n\
+ * Take a potentially misbehaving resolver function and make sure\n\
+ * onFulfilled and onRejected are only called once.\n\
+ *\n\
+ * Makes no guarantees about asynchrony.\n\
+ */\n\
+function doResolve(fn, onFulfilled, onRejected) {\n\
+  var done = false;\n\
+  try {\n\
+    fn(function (value) {\n\
+      if (done) return\n\
+      done = true\n\
+      onFulfilled(value)\n\
+    }, function (reason) {\n\
+      if (done) return\n\
+      done = true\n\
+      onRejected(reason)\n\
+    })\n\
+  } catch (ex) {\n\
+    if (done) return\n\
+    done = true\n\
+    onRejected(ex)\n\
+  }\n\
+}\n\
+\n\
+//# sourceURL=components/then/promise/4.0.0/core.js"
+));
+
+require.modules["then-promise"] = require.modules["then~promise@4.0.0"];
+require.modules["then~promise"] = require.modules["then~promise@4.0.0"];
+require.modules["promise"] = require.modules["then~promise@4.0.0"];
+
+
+require.register("mozilla~localforage@0.7.0", Function("exports, module",
 "(function() {\n\
     'use strict';\n\
 \n\
     // Promises!\n\
-    var Promise = this.Promise;\n\
+    var Promise = (typeof module !== 'undefined' && module.exports) ?\n\
+                  require(\"then~promise@4.0.0\") : this.Promise;\n\
 \n\
     // Avoid those magic constants!\n\
     var MODULE_TYPE_DEFINE = 1;\n\
@@ -239,7 +523,43 @@ require.register("pgherveou-localforage/src/localforage.js", Function("exports, 
         LOCALSTORAGE: 'localStorageWrapper',\n\
         WEBSQL: 'webSQLStorage',\n\
 \n\
-        config: {},\n\
+        _config: {\n\
+            description: '',\n\
+            name: 'localforage',\n\
+            // Default DB size is _JUST UNDER_ 5MB, as it's the highest size\n\
+            // we can use without a prompt.\n\
+            size: 4980736,\n\
+            storeName: 'keyvaluepairs',\n\
+            version: 1.0\n\
+        },\n\
+\n\
+        // Set any config values for localForage; can be called anytime before\n\
+        // the first API call (e.g. `getItem`, `setItem`).\n\
+        // We loop through options so we don't overwrite existing config\n\
+        // values.\n\
+        config: function(options) {\n\
+            // If the options argument is an object, we use it to set values.\n\
+            // Otherwise, we return either a specified config value or all\n\
+            // config values.\n\
+            if (typeof(options) === 'object') {\n\
+                // If localforage is ready and fully initialized, we can't set\n\
+                // any new configuration values. Instead, we return an error.\n\
+                if (this._ready) {\n\
+                    return new Error(\"Can't call config() after localforage \" +\n\
+                                     \"has been used.\");\n\
+                }\n\
+\n\
+                for (var i in options) {\n\
+                    this._config[i] = options[i];\n\
+                }\n\
+\n\
+                return true;\n\
+            } else if (typeof(options) === 'string') {\n\
+                return this._config[options];\n\
+            } else {\n\
+                return this._config;\n\
+            }\n\
+        },\n\
 \n\
         driver: function() {\n\
             return this._driver || null;\n\
@@ -274,13 +594,13 @@ require.register("pgherveou-localforage/src/localforage.js", Function("exports, 
                     var driver;\n\
                     switch (driverName) {\n\
                         case localForage.INDEXEDDB:\n\
-                            driver = require('./drivers/indexeddb');\n\
+                            driver = require(\"mozilla~localforage@0.7.0/src/drivers/indexeddb.js\");\n\
                             break;\n\
                         case localForage.LOCALSTORAGE:\n\
-                            driver = require('./drivers/localstorage');\n\
+                            driver = require(\"mozilla~localforage@0.7.0/src/drivers/localstorage.js\");\n\
                             break;\n\
                         case localForage.WEBSQL:\n\
-                            driver = require('./drivers/websql');\n\
+                            driver = require(\"mozilla~localforage@0.7.0/src/drivers/websql.js\");\n\
                     }\n\
 \n\
                     localForage._extend(driver);\n\
@@ -298,7 +618,7 @@ require.register("pgherveou-localforage/src/localforage.js", Function("exports, 
 \n\
         ready: function(callback) {\n\
             if (this._ready === null) {\n\
-                this._ready = this._initStorage(this.config);\n\
+                this._ready = this._initStorage(this._config);\n\
             }\n\
 \n\
             this._ready.then(callback, callback);\n\
@@ -350,21 +670,24 @@ require.register("pgherveou-localforage/src/localforage.js", Function("exports, 
         this.localforage = localForage;\n\
     }\n\
 }).call(this);\n\
-//@ sourceURL=pgherveou-localforage/src/localforage.js"
+\n\
+//# sourceURL=components/mozilla/localforage/0.7.0/src/localforage.js"
 ));
-require.register("pgherveou-localforage/src/drivers/indexeddb.js", Function("exports, require, module",
-"(function() {\n\
+
+require.register("mozilla~localforage@0.7.0/src/drivers/indexeddb.js", Function("exports, module",
+"// Some code originally from async_storage.js in\n\
+// [Gaia](https://github.com/mozilla-b2g/gaia).\n\
+(function() {\n\
     'use strict';\n\
 \n\
     // Originally found in https://github.com/mozilla-b2g/gaia/blob/e8f624e4cc9ea945727278039b3bc9bcb9f8667a/shared/js/async_storage.js\n\
 \n\
-    var Promise = this.Promise;\n\
+    // Promises!\n\
+    var Promise = (typeof module !== 'undefined' && module.exports) ?\n\
+                  require(\"then~promise@4.0.0\") : this.Promise;\n\
+\n\
     var db = null;\n\
-    var dbInfo = {\n\
-        name: 'localforage',\n\
-        storeName: 'keyvaluepairs',\n\
-        version: 1\n\
-    };\n\
+    var dbInfo = {};\n\
 \n\
     // Initialize IndexedDB; fall back to vendor-prefixed versions if needed.\n\
     var indexedDB = indexedDB || this.indexedDB || this.webkitIndexedDB ||\n\
@@ -380,10 +703,8 @@ require.register("pgherveou-localforage/src/drivers/indexeddb.js", Function("exp
     // previously exist), using any options set in window.localForageConfig.\n\
     function _initStorage(options) {\n\
         if (options) {\n\
-            for (var i in dbInfo) {\n\
-                if (options[i] !== undefined) {\n\
-                    dbInfo[i] = options[i];\n\
-                }\n\
+            for (var i in options) {\n\
+                dbInfo[i] = options[i];\n\
             }\n\
         }\n\
 \n\
@@ -407,20 +728,28 @@ require.register("pgherveou-localforage/src/drivers/indexeddb.js", Function("exp
         var _this = this;\n\
         return new Promise(function(resolve, reject) {\n\
             _this.ready().then(function() {\n\
-                var store = db.transaction(dbInfo.storeName, 'readonly').objectStore(dbInfo.storeName);\n\
+                var store = db.transaction(dbInfo.storeName, 'readonly')\n\
+                              .objectStore(dbInfo.storeName);\n\
                 var req = store.get(key);\n\
-                req.onsuccess = function getItemOnSuccess() {\n\
+\n\
+                req.onsuccess = function() {\n\
                     var value = req.result;\n\
                     if (value === undefined) {\n\
                         value = null;\n\
                     }\n\
+\n\
                     if (callback) {\n\
                         callback(value);\n\
                     }\n\
 \n\
                     resolve(value);\n\
                 };\n\
-                req.onerror = function getItemOnError() {\n\
+\n\
+                req.onerror = function() {\n\
+                    if (callback) {\n\
+                        callback(null, req.error.name);\n\
+                    }\n\
+\n\
                     reject(req.error.name);\n\
                 };\n\
             });\n\
@@ -431,7 +760,8 @@ require.register("pgherveou-localforage/src/drivers/indexeddb.js", Function("exp
         var _this = this;\n\
         return new Promise(function(resolve, reject) {\n\
             _this.ready().then(function() {\n\
-                var store = db.transaction(dbInfo.storeName, 'readwrite').objectStore(dbInfo.storeName);\n\
+                var store = db.transaction(dbInfo.storeName, 'readwrite')\n\
+                              .objectStore(dbInfo.storeName);\n\
 \n\
                 // Cast to undefined so the value passed to callback/promise is\n\
                 // the same as what one would get out of `getItem()` later.\n\
@@ -443,14 +773,18 @@ require.register("pgherveou-localforage/src/drivers/indexeddb.js", Function("exp
                 }\n\
 \n\
                 var req = store.put(value, key);\n\
-                req.onsuccess = function setItemOnSuccess() {\n\
+                req.onsuccess = function() {\n\
                     if (callback) {\n\
                         callback(value);\n\
                     }\n\
 \n\
                     resolve(value);\n\
                 };\n\
-                req.onerror = function setItemOnError() {\n\
+                req.onerror = function() {\n\
+                    if (callback) {\n\
+                        callback(null, req.error.name);\n\
+                    }\n\
+\n\
                     reject(req.error.name);\n\
                 };\n\
             });\n\
@@ -461,7 +795,8 @@ require.register("pgherveou-localforage/src/drivers/indexeddb.js", Function("exp
         var _this = this;\n\
         return new Promise(function(resolve, reject) {\n\
             _this.ready().then(function() {\n\
-                var store = db.transaction(dbInfo.storeName, 'readwrite').objectStore(dbInfo.storeName);\n\
+                var store = db.transaction(dbInfo.storeName, 'readwrite')\n\
+                              .objectStore(dbInfo.storeName);\n\
 \n\
                 // We use `['delete']` instead of `.delete` because IE 8 will\n\
                 // throw a fit if it sees the reserved word \"delete\" in this\n\
@@ -473,14 +808,34 @@ require.register("pgherveou-localforage/src/drivers/indexeddb.js", Function("exp
                 // make sure the minify step doesn't optimise this to `.delete`,\n\
                 // though it currently doesn't.\n\
                 var req = store['delete'](key);\n\
-                req.onsuccess = function removeItemOnSuccess() {\n\
+                req.onsuccess = function() {\n\
                     if (callback) {\n\
                         callback();\n\
                     }\n\
+\n\
                     resolve();\n\
                 };\n\
-                req.onerror = function removeItemOnError() {\n\
+\n\
+                req.onerror = function() {\n\
+                    if (callback) {\n\
+                        callback(req.error.name);\n\
+                    }\n\
+\n\
                     reject(req.error.name);\n\
+                };\n\
+\n\
+                // The request will be aborted if we've exceeded our storage\n\
+                // space. In this case, we will reject with a specific\n\
+                // \"QuotaExceededError\".\n\
+                req.onabort = function(event) {\n\
+                    var error = event.target.error;\n\
+                    if (error.name === 'QuotaExceededError') {\n\
+                        if (callback) {\n\
+                            callback(error.name);\n\
+                        }\n\
+\n\
+                        reject(error.name);\n\
+                    }\n\
                 };\n\
             });\n\
         });\n\
@@ -490,16 +845,23 @@ require.register("pgherveou-localforage/src/drivers/indexeddb.js", Function("exp
         var _this = this;\n\
         return new Promise(function(resolve, reject) {\n\
             _this.ready().then(function() {\n\
-                var store = db.transaction(dbInfo.storeName, 'readwrite').objectStore(dbInfo.storeName);\n\
+                var store = db.transaction(dbInfo.storeName, 'readwrite')\n\
+                              .objectStore(dbInfo.storeName);\n\
                 var req = store.clear();\n\
-                req.onsuccess = function clearOnSuccess() {\n\
+\n\
+                req.onsuccess = function() {\n\
                     if (callback) {\n\
                         callback();\n\
                     }\n\
 \n\
                     resolve();\n\
                 };\n\
-                req.onerror = function clearOnError() {\n\
+\n\
+                req.onerror = function() {\n\
+                    if (callback) {\n\
+                        callback(null, req.error.name);\n\
+                    }\n\
+\n\
                     reject(req.error.name);\n\
                 };\n\
             });\n\
@@ -510,16 +872,23 @@ require.register("pgherveou-localforage/src/drivers/indexeddb.js", Function("exp
         var _this = this;\n\
         return new Promise(function(resolve, reject) {\n\
             _this.ready().then(function() {\n\
-                var store = db.transaction(dbInfo.storeName, 'readonly').objectStore(dbInfo.storeName);\n\
+                var store = db.transaction(dbInfo.storeName, 'readonly')\n\
+                              .objectStore(dbInfo.storeName);\n\
                 var req = store.count();\n\
-                req.onsuccess = function lengthOnSuccess() {\n\
+\n\
+                req.onsuccess = function() {\n\
                     if (callback) {\n\
                         callback(req.result);\n\
                     }\n\
 \n\
                     resolve(req.result);\n\
                 };\n\
-                req.onerror = function lengthOnError() {\n\
+\n\
+                req.onerror = function() {\n\
+                    if (callback) {\n\
+                        callback(null, req.error.name);\n\
+                    }\n\
+\n\
                     reject(req.error.name);\n\
                 };\n\
             });\n\
@@ -540,11 +909,12 @@ require.register("pgherveou-localforage/src/drivers/indexeddb.js", Function("exp
             }\n\
 \n\
             _this.ready().then(function() {\n\
-                var store = db.transaction(dbInfo.storeName, 'readonly').objectStore(dbInfo.storeName);\n\
+                var store = db.transaction(dbInfo.storeName, 'readonly')\n\
+                              .objectStore(dbInfo.storeName);\n\
 \n\
                 var advanced = false;\n\
                 var req = store.openCursor();\n\
-                req.onsuccess = function keyOnSuccess() {\n\
+                req.onsuccess = function() {\n\
                     var cursor = req.result;\n\
                     if (!cursor) {\n\
                         // this means there weren't enough keys\n\
@@ -556,8 +926,10 @@ require.register("pgherveou-localforage/src/drivers/indexeddb.js", Function("exp
 \n\
                         return;\n\
                     }\n\
+\n\
                     if (n === 0) {\n\
-                        // We have the first key, return it if that's what they wanted\n\
+                        // We have the first key, return it if that's what they\n\
+                        // wanted.\n\
                         if (callback) {\n\
                             callback(cursor.key);\n\
                         }\n\
@@ -565,7 +937,8 @@ require.register("pgherveou-localforage/src/drivers/indexeddb.js", Function("exp
                         resolve(cursor.key);\n\
                     } else {\n\
                         if (!advanced) {\n\
-                            // Otherwise, ask the cursor to skip ahead n records\n\
+                            // Otherwise, ask the cursor to skip ahead n\n\
+                            // records.\n\
                             advanced = true;\n\
                             cursor.advance(n);\n\
                         } else {\n\
@@ -579,7 +952,11 @@ require.register("pgherveou-localforage/src/drivers/indexeddb.js", Function("exp
                     }\n\
                 };\n\
 \n\
-                req.onerror = function keyOnError() {\n\
+                req.onerror = function() {\n\
+                    if (callback) {\n\
+                        callback(null, req.error.name);\n\
+                    }\n\
+\n\
                     reject(req.error.name);\n\
                 };\n\
             });\n\
@@ -607,9 +984,11 @@ require.register("pgherveou-localforage/src/drivers/indexeddb.js", Function("exp
         this.asyncStorage = asyncStorage;\n\
     }\n\
 }).call(this);\n\
-//@ sourceURL=pgherveou-localforage/src/drivers/indexeddb.js"
+\n\
+//# sourceURL=components/mozilla/localforage/0.7.0/src/drivers/indexeddb.js"
 ));
-require.register("pgherveou-localforage/src/drivers/localstorage.js", Function("exports, require, module",
+
+require.register("mozilla~localforage@0.7.0/src/drivers/localstorage.js", Function("exports, module",
 "// If IndexedDB isn't available, we'll fall back to localStorage.\n\
 // Note that this will have considerable performance and storage\n\
 // side-effects (all data will be serialized on save and only data that\n\
@@ -618,10 +997,10 @@ require.register("pgherveou-localforage/src/drivers/localstorage.js", Function("
     'use strict';\n\
 \n\
     var keyPrefix = '';\n\
-    var dbInfo = {\n\
-        name: 'localforage'\n\
-    };\n\
-    var Promise = this.Promise;\n\
+    var dbInfo = {};\n\
+    // Promises!\n\
+    var Promise = (typeof module !== 'undefined' && module.exports) ?\n\
+                  require(\"then~promise@4.0.0\") : this.Promise;\n\
     var localStorage = null;\n\
 \n\
     // If the app is running inside a Google Chrome packaged webapp, or some\n\
@@ -641,10 +1020,8 @@ require.register("pgherveou-localforage/src/drivers/localstorage.js", Function("
     // window.localForageConfig.\n\
     function _initStorage(options) {\n\
         if (options) {\n\
-            for (var i in dbInfo) {\n\
-                if (options[i] !== undefined) {\n\
-                    dbInfo[i] = options[i];\n\
-                }\n\
+            for (var i in options) {\n\
+                dbInfo[i] = options[i];\n\
             }\n\
         }\n\
 \n\
@@ -706,11 +1083,15 @@ require.register("pgherveou-localforage/src/drivers/localstorage.js", Function("
                     }\n\
 \n\
                     if (callback) {\n\
-                        callback(result);\n\
+                        callback(result, null);\n\
                     }\n\
 \n\
                     resolve(result);\n\
                 } catch (e) {\n\
+                    if (callback) {\n\
+                        callback(null, e);\n\
+                    }\n\
+\n\
                     reject(e);\n\
                 }\n\
             });\n\
@@ -896,9 +1277,7 @@ require.register("pgherveou-localforage/src/drivers/localstorage.js", Function("
                 }\n\
             }\n\
 \n\
-            var str = _bufferToString(buffer);\n\
-\n\
-            callback(null, marker + str);\n\
+            callback(marker + _bufferToString(buffer));\n\
         } else if (valueString === \"[object Blob]\") {\n\
             // Conver the blob to a binaryArray and then to a string.\n\
             var fileReader = new FileReader();\n\
@@ -906,18 +1285,19 @@ require.register("pgherveou-localforage/src/drivers/localstorage.js", Function("
             fileReader.onload = function() {\n\
                 var str = _bufferToString(this.result);\n\
 \n\
-                callback(null, SERIALIZED_MARKER + TYPE_BLOB + str);\n\
+                callback(SERIALIZED_MARKER + TYPE_BLOB + str);\n\
             };\n\
 \n\
             fileReader.readAsArrayBuffer(value);\n\
         } else {\n\
             try {\n\
-                callback(null, JSON.stringify(value));\n\
+                callback(JSON.stringify(value));\n\
             } catch (e) {\n\
                 if (window.console && window.console.error) {\n\
                     window.console.error(\"Couldn't convert value into a JSON string: \", value);\n\
                 }\n\
-                callback(e);\n\
+\n\
+                callback(null, e);\n\
             }\n\
         }\n\
     }\n\
@@ -939,11 +1319,28 @@ require.register("pgherveou-localforage/src/drivers/localstorage.js", Function("
                 // Save the original value to pass to the callback.\n\
                 var originalValue = value;\n\
 \n\
-                _serialize(value, function setSerialized(error, value) {\n\
+                _serialize(value, function(value, error) {\n\
                     if (error) {\n\
+                        if (callback) {\n\
+                            callback(null, error);\n\
+                        }\n\
+\n\
                         reject(error);\n\
                     } else {\n\
-                        localStorage.setItem(keyPrefix + key, value);\n\
+                        try {\n\
+                            localStorage.setItem(keyPrefix + key, value);\n\
+                        } catch (e) {\n\
+                            // localStorage capacity exceeded.\n\
+                            // TODO: Make this a specific error/event.\n\
+                            if (e.name === 'QuotaExceededError' ||\n\
+                                e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {\n\
+                                if (callback) {\n\
+                                    callback(null, e);\n\
+                                }\n\
+\n\
+                                reject(e);\n\
+                            }\n\
+                        }\n\
 \n\
                         if (callback) {\n\
                             callback(originalValue);\n\
@@ -978,9 +1375,11 @@ require.register("pgherveou-localforage/src/drivers/localstorage.js", Function("
         this.localStorageWrapper = localStorageWrapper;\n\
     }\n\
 }).call(this);\n\
-//@ sourceURL=pgherveou-localforage/src/drivers/localstorage.js"
+\n\
+//# sourceURL=components/mozilla/localforage/0.7.0/src/drivers/localstorage.js"
 ));
-require.register("pgherveou-localforage/src/drivers/websql.js", Function("exports, require, module",
+
+require.register("mozilla~localforage@0.7.0/src/drivers/websql.js", Function("exports, module",
 "/*\n\
  * Includes code from:\n\
  *\n\
@@ -998,18 +1397,13 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
     // verbose ways of binary <-> string data storage.\n\
     var BASE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';\n\
 \n\
-    var Promise = this.Promise;\n\
+    // Promises!\n\
+    var Promise = (typeof module !== 'undefined' && module.exports) ?\n\
+                  require(\"then~promise@4.0.0\") : this.Promise;\n\
+\n\
     var openDatabase = this.openDatabase;\n\
     var db = null;\n\
-    var dbInfo = {\n\
-        description: '',\n\
-        name: 'localforage',\n\
-        // Default DB size is _JUST UNDER_ 5MB, as it's the highest size we can use\n\
-        // without a prompt.\n\
-        size: 4980736,\n\
-        storeName: 'keyvaluepairs',\n\
-        version: '1.0'\n\
-    };\n\
+    var dbInfo = {};\n\
 \n\
     var SERIALIZED_MARKER = '__lfsc__:';\n\
     var SERIALIZED_MARKER_LENGTH = SERIALIZED_MARKER.length;\n\
@@ -1036,23 +1430,28 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
     // Open the WebSQL database (automatically creates one if one didn't\n\
     // previously exist), using any options set in window.localForageConfig.\n\
     function _initStorage(options) {\n\
+        var _this = this;\n\
+\n\
         if (options) {\n\
             for (var i in dbInfo) {\n\
-                if (options[i] !== undefined) {\n\
-                    dbInfo[i] = typeof(options[i]) !== 'string' ? options[i].toString() : options[i];\n\
-                }\n\
+                dbInfo[i] = typeof(options[i]) !== 'string' ? options[i].toString() : options[i];\n\
             }\n\
         }\n\
 \n\
         return new Promise(function(resolve) {\n\
             // Open the database; the openDatabase API will automatically\n\
             // create it for us if it doesn't exist.\n\
-            db = openDatabase(dbInfo.name, dbInfo.version, dbInfo.description,\n\
-                              dbInfo.size);\n\
+            try {\n\
+                db = openDatabase(dbInfo.name, dbInfo.version,\n\
+                                  dbInfo.description, dbInfo.size);\n\
+            } catch (e) {\n\
+                return _this.setDriver('localStorageWrapper').then(resolve);\n\
+            }\n\
 \n\
             // Create our key/value table if it doesn't exist.\n\
             db.transaction(function (t) {\n\
-                t.executeSql('CREATE TABLE IF NOT EXISTS ' + dbInfo.storeName + ' (id INTEGER PRIMARY KEY, key unique, value)', [], function() {\n\
+                t.executeSql('CREATE TABLE IF NOT EXISTS ' + dbInfo.storeName + \n\
+                             ' (id INTEGER PRIMARY KEY, key unique, value)', [], function() {\n\
                     resolve();\n\
                 }, null);\n\
             });\n\
@@ -1061,10 +1460,11 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
 \n\
     function getItem(key, callback) {\n\
         var _this = this;\n\
-        return new Promise(function(resolve) {\n\
+        return new Promise(function(resolve, reject) {\n\
             _this.ready().then(function() {\n\
                 db.transaction(function (t) {\n\
-                    t.executeSql('SELECT * FROM ' + dbInfo.storeName + ' WHERE key = ? LIMIT 1', [key], function (t, results) {\n\
+                    t.executeSql('SELECT * FROM ' + dbInfo.storeName + \n\
+                                 ' WHERE key = ? LIMIT 1', [key], function (t, results) {\n\
                         var result = results.rows.length ? results.rows.item(0).value : null;\n\
 \n\
                         // Check to see if this is serialized content we need to\n\
@@ -1078,7 +1478,13 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
                         }\n\
 \n\
                         resolve(result);\n\
-                    }, null);\n\
+                    }, function(t, error) {\n\
+                        if (callback) {\n\
+                            callback(null, error);\n\
+                        }\n\
+\n\
+                        reject(error);\n\
+                    });\n\
                 });\n\
             });\n\
         });\n\
@@ -1098,18 +1504,41 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
                 // Save the original value to pass to the callback.\n\
                 var originalValue = value;\n\
 \n\
-                _serialize(value, function setItemserializeValueCallback(error, value) {\n\
+                _serialize(value, function(value, error) {\n\
                     if (error) {\n\
                         reject(error);\n\
                     } else {\n\
                         db.transaction(function (t) {\n\
-                            t.executeSql('INSERT OR REPLACE INTO ' + dbInfo.storeName + ' (key, value) VALUES (?, ?)', [key, value], function() {\n\
+                            t.executeSql('INSERT OR REPLACE INTO ' + dbInfo.storeName + \n\
+                                         ' (key, value) VALUES (?, ?)', [key, value], function() {\n\
                                 if (callback) {\n\
                                     callback(originalValue);\n\
                                 }\n\
 \n\
                                 resolve(originalValue);\n\
-                            }, null);\n\
+                            }, function(t, error) {\n\
+                                if (callback) {\n\
+                                    callback(null, error);\n\
+                                }\n\
+\n\
+                                reject(error);\n\
+                            });\n\
+                        }, function(sqlError) { // The transaction failed; check\n\
+                                                // to see if it's a quota error.\n\
+                            if (sqlError.code === sqlError.QUOTA_ERR) {\n\
+                                // We reject the callback outright for now, but\n\
+                                // it's worth trying to re-run the transaction.\n\
+                                // Even if the user accepts the prompt to use\n\
+                                // more storage on Safari, this error will\n\
+                                // be called.\n\
+                                //\n\
+                                // TODO: Try to re-run the transaction.\n\
+                                if (callback) {\n\
+                                    callback(null, sqlError);\n\
+                                }\n\
+\n\
+                                reject(sqlError);\n\
+                            }\n\
                         });\n\
                     }\n\
                 });\n\
@@ -1119,16 +1548,23 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
 \n\
     function removeItem(key, callback) {\n\
         var _this = this;\n\
-        return new Promise(function(resolve) {\n\
+        return new Promise(function(resolve, reject) {\n\
             _this.ready().then(function() {\n\
                 db.transaction(function (t) {\n\
-                    t.executeSql('DELETE FROM ' + dbInfo.storeName + ' WHERE key = ?', [key], function() {\n\
+                    t.executeSql('DELETE FROM ' + dbInfo.storeName + \n\
+                                 ' WHERE key = ?', [key], function() {\n\
                         if (callback) {\n\
                             callback();\n\
                         }\n\
 \n\
                         resolve();\n\
-                    }, null);\n\
+                    }, function(t, error) {\n\
+                        if (callback) {\n\
+                            callback(error);\n\
+                        }\n\
+\n\
+                        reject(error);\n\
+                    });\n\
                 });\n\
             });\n\
         });\n\
@@ -1138,7 +1574,7 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
     // TODO: Find out if this resets the AUTO_INCREMENT number.\n\
     function clear(callback) {\n\
         var _this = this;\n\
-        return new Promise(function(resolve) {\n\
+        return new Promise(function(resolve, reject) {\n\
             _this.ready().then(function() {\n\
                 db.transaction(function (t) {\n\
                     t.executeSql('DELETE FROM ' + dbInfo.storeName, [], function() {\n\
@@ -1147,7 +1583,13 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
                         }\n\
 \n\
                         resolve();\n\
-                    }, null);\n\
+                    }, function(t, error) {\n\
+                        if (callback) {\n\
+                            callback(error);\n\
+                        }\n\
+\n\
+                        reject(error);\n\
+                    });\n\
                 });\n\
             });\n\
         });\n\
@@ -1157,11 +1599,12 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
     // localForage.\n\
     function length(callback) {\n\
         var _this = this;\n\
-        return new Promise(function(resolve) {\n\
+        return new Promise(function(resolve, reject) {\n\
             _this.ready().then(function() {\n\
                 db.transaction(function (t) {\n\
                     // Ahhh, SQL makes this one soooooo easy.\n\
-                    t.executeSql('SELECT COUNT(key) as c FROM ' + dbInfo.storeName, [], function (t, results) {\n\
+                    t.executeSql('SELECT COUNT(key) as c FROM ' + \n\
+                                 dbInfo.storeName, [], function (t, results) {\n\
                         var result = results.rows.item(0).c;\n\
 \n\
                         if (callback) {\n\
@@ -1169,7 +1612,13 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
                         }\n\
 \n\
                         resolve(result);\n\
-                    }, null);\n\
+                    }, function(t, error) {\n\
+                        if (callback) {\n\
+                            callback(null, error);\n\
+                        }\n\
+\n\
+                        reject(error);\n\
+                    });\n\
                 });\n\
             });\n\
         });\n\
@@ -1184,10 +1633,11 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
     // TODO: Don't change ID on `setItem()`.\n\
     function key(n, callback) {\n\
         var _this = this;\n\
-        return new Promise(function(resolve) {\n\
+        return new Promise(function(resolve, reject) {\n\
             _this.ready().then(function() {\n\
                 db.transaction(function (t) {\n\
-                    t.executeSql('SELECT key FROM ' + dbInfo.storeName + ' WHERE id = ? LIMIT 1', [n + 1], function (t, results) {\n\
+                    t.executeSql('SELECT key FROM ' + dbInfo.storeName +\n\
+                                 ' WHERE id = ? LIMIT 1', [n + 1], function (t, results) {\n\
                         var result = results.rows.length ? results.rows.item(0).key : null;\n\
 \n\
                         if (callback) {\n\
@@ -1195,7 +1645,13 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
                         }\n\
 \n\
                         resolve(result);\n\
-                    }, null);\n\
+                    }, function(t, error) {\n\
+                        if (callback) {\n\
+                            callback(null, error);\n\
+                        }\n\
+\n\
+                        reject(error);\n\
+                    });\n\
                 });\n\
             });\n\
         });\n\
@@ -1356,9 +1812,7 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
                 }\n\
             }\n\
 \n\
-            var str = _bufferToString(buffer);\n\
-\n\
-            callback(null, marker + str);\n\
+            callback(marker + _bufferToString(buffer));\n\
         } else if (valueString === \"[object Blob]\") {\n\
             // Conver the blob to a binaryArray and then to a string.\n\
             var fileReader = new FileReader();\n\
@@ -1366,18 +1820,19 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
             fileReader.onload = function() {\n\
                 var str = _bufferToString(this.result);\n\
 \n\
-                callback(null, SERIALIZED_MARKER + TYPE_BLOB + str);\n\
+                callback(SERIALIZED_MARKER + TYPE_BLOB + str);\n\
             };\n\
 \n\
             fileReader.readAsArrayBuffer(value);\n\
         } else {\n\
             try {\n\
-                callback(null, JSON.stringify(value));\n\
+                callback(JSON.stringify(value));\n\
             } catch (e) {\n\
                 if (window.console && window.console.error) {\n\
                     window.console.error(\"Couldn't convert value into a JSON string: \", value);\n\
                 }\n\
-                callback(e);\n\
+\n\
+                callback(null, e);\n\
             }\n\
         }\n\
     }\n\
@@ -1403,9 +1858,16 @@ require.register("pgherveou-localforage/src/drivers/websql.js", Function("export
         this.webSQLStorage = webSQLStorage;\n\
     }\n\
 }).call(this);\n\
-//@ sourceURL=pgherveou-localforage/src/drivers/websql.js"
+\n\
+//# sourceURL=components/mozilla/localforage/0.7.0/src/drivers/websql.js"
 ));
-require.register("chaijs-assertion-error/index.js", Function("exports, require, module",
+
+require.modules["mozilla-localforage"] = require.modules["mozilla~localforage@0.7.0"];
+require.modules["mozilla~localforage"] = require.modules["mozilla~localforage@0.7.0"];
+require.modules["localforage"] = require.modules["mozilla~localforage@0.7.0"];
+
+
+require.register("chaijs~assertion-error@1.0.0", Function("exports, module",
 "/*!\n\
  * assertion-error\n\
  * Copyright(c) 2013 Jake Luer <jake@qualiancy.com>\n\
@@ -1516,9 +1978,16 @@ AssertionError.prototype.toJSON = function (stack) {\n\
 \n\
   return props;\n\
 };\n\
-//@ sourceURL=chaijs-assertion-error/index.js"
+\n\
+//# sourceURL=components/chaijs/assertion-error/1.0.0/index.js"
 ));
-require.register("chaijs-type-detect/lib/type.js", Function("exports, require, module",
+
+require.modules["chaijs-assertion-error"] = require.modules["chaijs~assertion-error@1.0.0"];
+require.modules["chaijs~assertion-error"] = require.modules["chaijs~assertion-error@1.0.0"];
+require.modules["assertion-error"] = require.modules["chaijs~assertion-error@1.0.0"];
+
+
+require.register("chaijs~type-detect@0.1.1", Function("exports, module",
 "/*!\n\
  * type-detect\n\
  * Copyright(c) 2013 jake luer <jake@alogicalparadox.com>\n\
@@ -1661,9 +2130,16 @@ Library.prototype.test = function (obj, type) {\n\
     throw new ReferenceError('Type test \"' + type + '\" not defined or invalid.');\n\
   }\n\
 };\n\
-//@ sourceURL=chaijs-type-detect/lib/type.js"
+\n\
+//# sourceURL=components/chaijs/type-detect/0.1.1/lib/type.js"
 ));
-require.register("chaijs-deep-eql/lib/eql.js", Function("exports, require, module",
+
+require.modules["chaijs-type-detect"] = require.modules["chaijs~type-detect@0.1.1"];
+require.modules["chaijs~type-detect"] = require.modules["chaijs~type-detect@0.1.1"];
+require.modules["type-detect"] = require.modules["chaijs~type-detect@0.1.1"];
+
+
+require.register("chaijs~deep-eql@0.1.3", Function("exports, module",
 "/*!\n\
  * deep-eql\n\
  * Copyright(c) 2013 Jake Luer <jake@alogicalparadox.com>\n\
@@ -1674,14 +2150,14 @@ require.register("chaijs-deep-eql/lib/eql.js", Function("exports, require, modul
  * Module dependencies\n\
  */\n\
 \n\
-var type = require('type-detect');\n\
+var type = require(\"chaijs~type-detect@0.1.1\");\n\
 \n\
 /*!\n\
  * Buffer.isBuffer browser shim\n\
  */\n\
 \n\
 var Buffer;\n\
-try { Buffer = require('buffer').Buffer; }\n\
+try { Buffer = require(\"buffer\").Buffer; }\n\
 catch(ex) {\n\
   Buffer = {};\n\
   Buffer.isBuffer = function() { return false; }\n\
@@ -1921,13 +2397,22 @@ function objectEqual(a, b, m) {\n\
 \n\
   return true;\n\
 }\n\
-//@ sourceURL=chaijs-deep-eql/lib/eql.js"
+\n\
+//# sourceURL=components/chaijs/deep-eql/0.1.3/lib/eql.js"
 ));
-require.register("chaijs-chai/index.js", Function("exports, require, module",
-"module.exports = require('./lib/chai');\n\
-//@ sourceURL=chaijs-chai/index.js"
+
+require.modules["chaijs-deep-eql"] = require.modules["chaijs~deep-eql@0.1.3"];
+require.modules["chaijs~deep-eql"] = require.modules["chaijs~deep-eql@0.1.3"];
+require.modules["deep-eql"] = require.modules["chaijs~deep-eql@0.1.3"];
+
+
+require.register("chaijs~chai@1.9.1", Function("exports, module",
+"module.exports = require(\"chaijs~chai@1.9.1/lib/chai.js\");\n\
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/index.js"
 ));
-require.register("chaijs-chai/lib/chai.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai.js", Function("exports, module",
 "/*!\n\
  * chai\n\
  * Copyright(c) 2011-2014 Jake Luer <jake@alogicalparadox.com>\n\
@@ -1947,13 +2432,13 @@ exports.version = '1.9.1';\n\
  * Assertion Error\n\
  */\n\
 \n\
-exports.AssertionError = require('assertion-error');\n\
+exports.AssertionError = require(\"chaijs~assertion-error@1.0.0\");\n\
 \n\
 /*!\n\
  * Utils for plugins (not exported)\n\
  */\n\
 \n\
-var util = require('./chai/utils');\n\
+var util = require(\"chaijs~chai@1.9.1/lib/chai/utils/index.js\");\n\
 \n\
 /**\n\
  * # .use(function)\n\
@@ -1978,46 +2463,48 @@ exports.use = function (fn) {\n\
  * Configuration\n\
  */\n\
 \n\
-var config = require('./chai/config');\n\
+var config = require(\"chaijs~chai@1.9.1/lib/chai/config.js\");\n\
 exports.config = config;\n\
 \n\
 /*!\n\
  * Primary `Assertion` prototype\n\
  */\n\
 \n\
-var assertion = require('./chai/assertion');\n\
+var assertion = require(\"chaijs~chai@1.9.1/lib/chai/assertion.js\");\n\
 exports.use(assertion);\n\
 \n\
 /*!\n\
  * Core Assertions\n\
  */\n\
 \n\
-var core = require('./chai/core/assertions');\n\
+var core = require(\"chaijs~chai@1.9.1/lib/chai/core/assertions.js\");\n\
 exports.use(core);\n\
 \n\
 /*!\n\
  * Expect interface\n\
  */\n\
 \n\
-var expect = require('./chai/interface/expect');\n\
+var expect = require(\"chaijs~chai@1.9.1/lib/chai/interface/expect.js\");\n\
 exports.use(expect);\n\
 \n\
 /*!\n\
  * Should interface\n\
  */\n\
 \n\
-var should = require('./chai/interface/should');\n\
+var should = require(\"chaijs~chai@1.9.1/lib/chai/interface/should.js\");\n\
 exports.use(should);\n\
 \n\
 /*!\n\
  * Assert interface\n\
  */\n\
 \n\
-var assert = require('./chai/interface/assert');\n\
+var assert = require(\"chaijs~chai@1.9.1/lib/chai/interface/assert.js\");\n\
 exports.use(assert);\n\
-//@ sourceURL=chaijs-chai/lib/chai.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai.js"
 ));
-require.register("chaijs-chai/lib/chai/assertion.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/assertion.js", Function("exports, module",
 "/*!\n\
  * chai\n\
  * http://chaijs.com\n\
@@ -2025,7 +2512,7 @@ require.register("chaijs-chai/lib/chai/assertion.js", Function("exports, require
  * MIT Licensed\n\
  */\n\
 \n\
-var config = require('./config');\n\
+var config = require(\"chaijs~chai@1.9.1/lib/chai/config.js\");\n\
 \n\
 module.exports = function (_chai, util) {\n\
   /*!\n\
@@ -2148,9 +2635,11 @@ module.exports = function (_chai, util) {\n\
       }\n\
   });\n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/assertion.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/assertion.js"
 ));
-require.register("chaijs-chai/lib/chai/config.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/config.js", Function("exports, module",
 "module.exports = {\n\
 \n\
   /**\n\
@@ -2201,9 +2690,11 @@ require.register("chaijs-chai/lib/chai/config.js", Function("exports, require, m
   truncateThreshold: 40\n\
 \n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/config.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/config.js"
 ));
-require.register("chaijs-chai/lib/chai/core/assertions.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/core/assertions.js", Function("exports, module",
 "/*!\n\
  * chai\n\
  * http://chaijs.com\n\
@@ -3518,9 +4009,11 @@ module.exports = function (chai, _) {\n\
     );\n\
   });\n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/core/assertions.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/core/assertions.js"
 ));
-require.register("chaijs-chai/lib/chai/interface/assert.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/interface/assert.js", Function("exports, module",
 "/*!\n\
  * chai\n\
  * Copyright(c) 2011-2014 Jake Luer <jake@alogicalparadox.com>\n\
@@ -4577,9 +5070,11 @@ module.exports = function (chai, util) {\n\
   ('Throw', 'throw')\n\
   ('Throw', 'throws');\n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/interface/assert.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/interface/assert.js"
 ));
-require.register("chaijs-chai/lib/chai/interface/expect.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/interface/expect.js", Function("exports, module",
 "/*!\n\
  * chai\n\
  * Copyright(c) 2011-2014 Jake Luer <jake@alogicalparadox.com>\n\
@@ -4592,9 +5087,11 @@ module.exports = function (chai, util) {\n\
   };\n\
 };\n\
 \n\
-//@ sourceURL=chaijs-chai/lib/chai/interface/expect.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/interface/expect.js"
 ));
-require.register("chaijs-chai/lib/chai/interface/should.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/interface/should.js", Function("exports, module",
 "/*!\n\
  * chai\n\
  * Copyright(c) 2011-2014 Jake Luer <jake@alogicalparadox.com>\n\
@@ -4673,9 +5170,11 @@ module.exports = function (chai, util) {\n\
   chai.should = loadShould;\n\
   chai.Should = loadShould;\n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/interface/should.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/interface/should.js"
 ));
-require.register("chaijs-chai/lib/chai/utils/addChainableMethod.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/utils/addChainableMethod.js", Function("exports, module",
 "/*!\n\
  * Chai - addChainingMethod utility\n\
  * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
@@ -4686,9 +5185,9 @@ require.register("chaijs-chai/lib/chai/utils/addChainableMethod.js", Function("e
  * Module dependencies\n\
  */\n\
 \n\
-var transferFlags = require('./transferFlags');\n\
-var flag = require('./flag');\n\
-var config = require('../config');\n\
+var transferFlags = require(\"chaijs~chai@1.9.1/lib/chai/utils/transferFlags.js\");\n\
+var flag = require(\"chaijs~chai@1.9.1/lib/chai/utils/flag.js\");\n\
+var config = require(\"chaijs~chai@1.9.1/lib/chai/config.js\");\n\
 \n\
 /*!\n\
  * Module variables\n\
@@ -4787,16 +5286,18 @@ module.exports = function (ctx, name, method, chainingBehavior) {\n\
     , configurable: true\n\
   });\n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/utils/addChainableMethod.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/utils/addChainableMethod.js"
 ));
-require.register("chaijs-chai/lib/chai/utils/addMethod.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/utils/addMethod.js", Function("exports, module",
 "/*!\n\
  * Chai - addMethod utility\n\
  * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
  * MIT Licensed\n\
  */\n\
 \n\
-var config = require('../config');\n\
+var config = require(\"chaijs~chai@1.9.1/lib/chai/config.js\");\n\
 \n\
 /**\n\
  * ### .addMethod (ctx, name, method)\n\
@@ -4822,7 +5323,7 @@ var config = require('../config');\n\
  * @name addMethod\n\
  * @api public\n\
  */\n\
-var flag = require('./flag');\n\
+var flag = require(\"chaijs~chai@1.9.1/lib/chai/utils/flag.js\");\n\
 \n\
 module.exports = function (ctx, name, method) {\n\
   ctx[name] = function () {\n\
@@ -4833,9 +5334,11 @@ module.exports = function (ctx, name, method) {\n\
     return result === undefined ? this : result;\n\
   };\n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/utils/addMethod.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/utils/addMethod.js"
 ));
-require.register("chaijs-chai/lib/chai/utils/addProperty.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/utils/addProperty.js", Function("exports, module",
 "/*!\n\
  * Chai - addProperty utility\n\
  * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
@@ -4876,9 +5379,11 @@ module.exports = function (ctx, name, getter) {\n\
     , configurable: true\n\
   });\n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/utils/addProperty.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/utils/addProperty.js"
 ));
-require.register("chaijs-chai/lib/chai/utils/flag.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/utils/flag.js", Function("exports, module",
 "/*!\n\
  * Chai - flag utility\n\
  * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
@@ -4911,9 +5416,11 @@ module.exports = function (obj, key, value) {\n\
     return flags[key];\n\
   }\n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/utils/flag.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/utils/flag.js"
 ));
-require.register("chaijs-chai/lib/chai/utils/getActual.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/utils/getActual.js", Function("exports, module",
 "/*!\n\
  * Chai - getActual utility\n\
  * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
@@ -4932,9 +5439,11 @@ require.register("chaijs-chai/lib/chai/utils/getActual.js", Function("exports, r
 module.exports = function (obj, args) {\n\
   return args.length > 4 ? args[4] : obj._obj;\n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/utils/getActual.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/utils/getActual.js"
 ));
-require.register("chaijs-chai/lib/chai/utils/getEnumerableProperties.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/utils/getEnumerableProperties.js", Function("exports, module",
 "/*!\n\
  * Chai - getEnumerableProperties utility\n\
  * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
@@ -4960,9 +5469,11 @@ module.exports = function getEnumerableProperties(object) {\n\
   }\n\
   return result;\n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/utils/getEnumerableProperties.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/utils/getEnumerableProperties.js"
 ));
-require.register("chaijs-chai/lib/chai/utils/getMessage.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/utils/getMessage.js", Function("exports, module",
 "/*!\n\
  * Chai - message composition utility\n\
  * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
@@ -4973,10 +5484,10 @@ require.register("chaijs-chai/lib/chai/utils/getMessage.js", Function("exports, 
  * Module dependancies\n\
  */\n\
 \n\
-var flag = require('./flag')\n\
-  , getActual = require('./getActual')\n\
-  , inspect = require('./inspect')\n\
-  , objDisplay = require('./objDisplay');\n\
+var flag = require(\"chaijs~chai@1.9.1/lib/chai/utils/flag.js\")\n\
+  , getActual = require(\"chaijs~chai@1.9.1/lib/chai/utils/getActual.js\")\n\
+  , inspect = require(\"chaijs~chai@1.9.1/lib/chai/utils/inspect.js\")\n\
+  , objDisplay = require(\"chaijs~chai@1.9.1/lib/chai/utils/objDisplay.js\");\n\
 \n\
 /**\n\
  * ### .getMessage(object, message, negateMessage)\n\
@@ -5012,9 +5523,11 @@ module.exports = function (obj, args) {\n\
 \n\
   return flagMsg ? flagMsg + ': ' + msg : msg;\n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/utils/getMessage.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/utils/getMessage.js"
 ));
-require.register("chaijs-chai/lib/chai/utils/getName.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/utils/getName.js", Function("exports, module",
 "/*!\n\
  * Chai - getName utility\n\
  * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
@@ -5035,9 +5548,11 @@ module.exports = function (func) {\n\
   var match = /^\\s?function ([^(]*)\\(/.exec(func);\n\
   return match && match[1] ? match[1] : \"\";\n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/utils/getName.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/utils/getName.js"
 ));
-require.register("chaijs-chai/lib/chai/utils/getPathValue.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/utils/getPathValue.js", Function("exports, module",
 "/*!\n\
  * Chai - getPathValue utility\n\
  * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
@@ -5140,9 +5655,11 @@ function _getPathValue (parsed, obj) {\n\
   }\n\
   return res;\n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/utils/getPathValue.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/utils/getPathValue.js"
 ));
-require.register("chaijs-chai/lib/chai/utils/getProperties.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/utils/getProperties.js", Function("exports, module",
 "/*!\n\
  * Chai - getProperties utility\n\
  * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
@@ -5178,9 +5695,11 @@ module.exports = function getProperties(object) {\n\
 \n\
   return result;\n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/utils/getProperties.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/utils/getProperties.js"
 ));
-require.register("chaijs-chai/lib/chai/utils/index.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/utils/index.js", Function("exports, module",
 "/*!\n\
  * chai\n\
  * Copyright(c) 2011 Jake Luer <jake@alogicalparadox.com>\n\
@@ -5197,113 +5716,115 @@ var exports = module.exports = {};\n\
  * test utility\n\
  */\n\
 \n\
-exports.test = require('./test');\n\
+exports.test = require(\"chaijs~chai@1.9.1/lib/chai/utils/test.js\");\n\
 \n\
 /*!\n\
  * type utility\n\
  */\n\
 \n\
-exports.type = require('./type');\n\
+exports.type = require(\"chaijs~chai@1.9.1/lib/chai/utils/type.js\");\n\
 \n\
 /*!\n\
  * message utility\n\
  */\n\
 \n\
-exports.getMessage = require('./getMessage');\n\
+exports.getMessage = require(\"chaijs~chai@1.9.1/lib/chai/utils/getMessage.js\");\n\
 \n\
 /*!\n\
  * actual utility\n\
  */\n\
 \n\
-exports.getActual = require('./getActual');\n\
+exports.getActual = require(\"chaijs~chai@1.9.1/lib/chai/utils/getActual.js\");\n\
 \n\
 /*!\n\
  * Inspect util\n\
  */\n\
 \n\
-exports.inspect = require('./inspect');\n\
+exports.inspect = require(\"chaijs~chai@1.9.1/lib/chai/utils/inspect.js\");\n\
 \n\
 /*!\n\
  * Object Display util\n\
  */\n\
 \n\
-exports.objDisplay = require('./objDisplay');\n\
+exports.objDisplay = require(\"chaijs~chai@1.9.1/lib/chai/utils/objDisplay.js\");\n\
 \n\
 /*!\n\
  * Flag utility\n\
  */\n\
 \n\
-exports.flag = require('./flag');\n\
+exports.flag = require(\"chaijs~chai@1.9.1/lib/chai/utils/flag.js\");\n\
 \n\
 /*!\n\
  * Flag transferring utility\n\
  */\n\
 \n\
-exports.transferFlags = require('./transferFlags');\n\
+exports.transferFlags = require(\"chaijs~chai@1.9.1/lib/chai/utils/transferFlags.js\");\n\
 \n\
 /*!\n\
  * Deep equal utility\n\
  */\n\
 \n\
-exports.eql = require('deep-eql');\n\
+exports.eql = require(\"chaijs~deep-eql@0.1.3\");\n\
 \n\
 /*!\n\
  * Deep path value\n\
  */\n\
 \n\
-exports.getPathValue = require('./getPathValue');\n\
+exports.getPathValue = require(\"chaijs~chai@1.9.1/lib/chai/utils/getPathValue.js\");\n\
 \n\
 /*!\n\
  * Function name\n\
  */\n\
 \n\
-exports.getName = require('./getName');\n\
+exports.getName = require(\"chaijs~chai@1.9.1/lib/chai/utils/getName.js\");\n\
 \n\
 /*!\n\
  * add Property\n\
  */\n\
 \n\
-exports.addProperty = require('./addProperty');\n\
+exports.addProperty = require(\"chaijs~chai@1.9.1/lib/chai/utils/addProperty.js\");\n\
 \n\
 /*!\n\
  * add Method\n\
  */\n\
 \n\
-exports.addMethod = require('./addMethod');\n\
+exports.addMethod = require(\"chaijs~chai@1.9.1/lib/chai/utils/addMethod.js\");\n\
 \n\
 /*!\n\
  * overwrite Property\n\
  */\n\
 \n\
-exports.overwriteProperty = require('./overwriteProperty');\n\
+exports.overwriteProperty = require(\"chaijs~chai@1.9.1/lib/chai/utils/overwriteProperty.js\");\n\
 \n\
 /*!\n\
  * overwrite Method\n\
  */\n\
 \n\
-exports.overwriteMethod = require('./overwriteMethod');\n\
+exports.overwriteMethod = require(\"chaijs~chai@1.9.1/lib/chai/utils/overwriteMethod.js\");\n\
 \n\
 /*!\n\
  * Add a chainable method\n\
  */\n\
 \n\
-exports.addChainableMethod = require('./addChainableMethod');\n\
+exports.addChainableMethod = require(\"chaijs~chai@1.9.1/lib/chai/utils/addChainableMethod.js\");\n\
 \n\
 /*!\n\
  * Overwrite chainable method\n\
  */\n\
 \n\
-exports.overwriteChainableMethod = require('./overwriteChainableMethod');\n\
+exports.overwriteChainableMethod = require(\"chaijs~chai@1.9.1/lib/chai/utils/overwriteChainableMethod.js\");\n\
 \n\
-//@ sourceURL=chaijs-chai/lib/chai/utils/index.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/utils/index.js"
 ));
-require.register("chaijs-chai/lib/chai/utils/inspect.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/utils/inspect.js", Function("exports, module",
 "// This is (almost) directly from Node.js utils\n\
 // https://github.com/joyent/node/blob/f8c335d0caf47f16d31413f89aa28eda3878e3aa/lib/util.js\n\
 \n\
-var getName = require('./getName');\n\
-var getProperties = require('./getProperties');\n\
-var getEnumerableProperties = require('./getEnumerableProperties');\n\
+var getName = require(\"chaijs~chai@1.9.1/lib/chai/utils/getName.js\");\n\
+var getProperties = require(\"chaijs~chai@1.9.1/lib/chai/utils/getProperties.js\");\n\
+var getEnumerableProperties = require(\"chaijs~chai@1.9.1/lib/chai/utils/getEnumerableProperties.js\");\n\
 \n\
 module.exports = inspect;\n\
 \n\
@@ -5627,9 +6148,11 @@ function isError(e) {\n\
 function objectToString(o) {\n\
   return Object.prototype.toString.call(o);\n\
 }\n\
-//@ sourceURL=chaijs-chai/lib/chai/utils/inspect.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/utils/inspect.js"
 ));
-require.register("chaijs-chai/lib/chai/utils/objDisplay.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/utils/objDisplay.js", Function("exports, module",
 "/*!\n\
  * Chai - flag utility\n\
  * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
@@ -5640,8 +6163,8 @@ require.register("chaijs-chai/lib/chai/utils/objDisplay.js", Function("exports, 
  * Module dependancies\n\
  */\n\
 \n\
-var inspect = require('./inspect');\n\
-var config = require('../config');\n\
+var inspect = require(\"chaijs~chai@1.9.1/lib/chai/utils/inspect.js\");\n\
+var config = require(\"chaijs~chai@1.9.1/lib/chai/config.js\");\n\
 \n\
 /**\n\
  * ### .objDisplay (object)\n\
@@ -5679,9 +6202,11 @@ module.exports = function (obj) {\n\
     return str;\n\
   }\n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/utils/objDisplay.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/utils/objDisplay.js"
 ));
-require.register("chaijs-chai/lib/chai/utils/overwriteMethod.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/utils/overwriteMethod.js", Function("exports, module",
 "/*!\n\
  * Chai - overwriteMethod utility\n\
  * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
@@ -5733,9 +6258,11 @@ module.exports = function (ctx, name, method) {\n\
     return result === undefined ? this : result;\n\
   }\n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/utils/overwriteMethod.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/utils/overwriteMethod.js"
 ));
-require.register("chaijs-chai/lib/chai/utils/overwriteProperty.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/utils/overwriteProperty.js", Function("exports, module",
 "/*!\n\
  * Chai - overwriteProperty utility\n\
  * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
@@ -5790,9 +6317,11 @@ module.exports = function (ctx, name, getter) {\n\
     , configurable: true\n\
   });\n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/utils/overwriteProperty.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/utils/overwriteProperty.js"
 ));
-require.register("chaijs-chai/lib/chai/utils/overwriteChainableMethod.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/utils/overwriteChainableMethod.js", Function("exports, module",
 "/*!\n\
  * Chai - overwriteChainableMethod utility\n\
  * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
@@ -5846,9 +6375,11 @@ module.exports = function (ctx, name, method, chainingBehavior) {\n\
     return result === undefined ? this : result;\n\
   };\n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/utils/overwriteChainableMethod.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/utils/overwriteChainableMethod.js"
 ));
-require.register("chaijs-chai/lib/chai/utils/test.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/utils/test.js", Function("exports, module",
 "/*!\n\
  * Chai - test utility\n\
  * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
@@ -5859,7 +6390,7 @@ require.register("chaijs-chai/lib/chai/utils/test.js", Function("exports, requir
  * Module dependancies\n\
  */\n\
 \n\
-var flag = require('./flag');\n\
+var flag = require(\"chaijs~chai@1.9.1/lib/chai/utils/flag.js\");\n\
 \n\
 /**\n\
  * # test(object, expression)\n\
@@ -5875,9 +6406,11 @@ module.exports = function (obj, args) {\n\
     , expr = args[0];\n\
   return negate ? !expr : expr;\n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/utils/test.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/utils/test.js"
 ));
-require.register("chaijs-chai/lib/chai/utils/transferFlags.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/utils/transferFlags.js", Function("exports, module",
 "/*!\n\
  * Chai - transferFlags utility\n\
  * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
@@ -5922,9 +6455,11 @@ module.exports = function (assertion, object, includeAll) {\n\
     }\n\
   }\n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/utils/transferFlags.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/utils/transferFlags.js"
 ));
-require.register("chaijs-chai/lib/chai/utils/type.js", Function("exports, require, module",
+
+require.register("chaijs~chai@1.9.1/lib/chai/utils/type.js", Function("exports, module",
 "/*!\n\
  * Chai - type utility\n\
  * Copyright(c) 2012-2014 Jake Luer <jake@alogicalparadox.com>\n\
@@ -5970,10 +6505,17 @@ module.exports = function (obj) {\n\
   if (obj === Object(obj)) return 'object';\n\
   return typeof obj;\n\
 };\n\
-//@ sourceURL=chaijs-chai/lib/chai/utils/type.js"
+\n\
+//# sourceURL=components/chaijs/chai/1.9.1/lib/chai/utils/type.js"
 ));
-require.register("lru-cache/index.js", Function("exports, require, module",
-"var lf = require('localforage'),\n\
+
+require.modules["chaijs-chai"] = require.modules["chaijs~chai@1.9.1"];
+require.modules["chaijs~chai"] = require.modules["chaijs~chai@1.9.1"];
+require.modules["chai"] = require.modules["chaijs~chai@1.9.1"];
+
+
+require.register("lru-cache", Function("exports, module",
+"var lf = require(\"mozilla~localforage@0.7.0\"),\n\
     Promise = window.Promise;\n\
 \n\
 // max size if not specifed\n\
@@ -6502,58 +7044,11 @@ function LRUCache (options) {\n\
  */\n\
 \n\
 module.exports = LRUCache;\n\
-//@ sourceURL=lru-cache/index.js"
+\n\
+//# sourceURL=index.js"
 ));
 
+require.modules["lru-cache"] = require.modules["lru-cache"];
 
 
-
-
-
-require.alias("pgherveou-localforage/src/localforage.js", "lru-cache/deps/localforage/src/localforage.js");
-require.alias("pgherveou-localforage/src/drivers/indexeddb.js", "lru-cache/deps/localforage/src/drivers/indexeddb.js");
-require.alias("pgherveou-localforage/src/drivers/localstorage.js", "lru-cache/deps/localforage/src/drivers/localstorage.js");
-require.alias("pgherveou-localforage/src/drivers/websql.js", "lru-cache/deps/localforage/src/drivers/websql.js");
-require.alias("pgherveou-localforage/src/localforage.js", "lru-cache/deps/localforage/index.js");
-require.alias("pgherveou-localforage/src/localforage.js", "localforage/index.js");
-require.alias("pgherveou-localforage/src/localforage.js", "pgherveou-localforage/index.js");
-require.alias("chaijs-chai/index.js", "lru-cache/deps/chai/index.js");
-require.alias("chaijs-chai/lib/chai.js", "lru-cache/deps/chai/lib/chai.js");
-require.alias("chaijs-chai/lib/chai/assertion.js", "lru-cache/deps/chai/lib/chai/assertion.js");
-require.alias("chaijs-chai/lib/chai/config.js", "lru-cache/deps/chai/lib/chai/config.js");
-require.alias("chaijs-chai/lib/chai/core/assertions.js", "lru-cache/deps/chai/lib/chai/core/assertions.js");
-require.alias("chaijs-chai/lib/chai/interface/assert.js", "lru-cache/deps/chai/lib/chai/interface/assert.js");
-require.alias("chaijs-chai/lib/chai/interface/expect.js", "lru-cache/deps/chai/lib/chai/interface/expect.js");
-require.alias("chaijs-chai/lib/chai/interface/should.js", "lru-cache/deps/chai/lib/chai/interface/should.js");
-require.alias("chaijs-chai/lib/chai/utils/addChainableMethod.js", "lru-cache/deps/chai/lib/chai/utils/addChainableMethod.js");
-require.alias("chaijs-chai/lib/chai/utils/addMethod.js", "lru-cache/deps/chai/lib/chai/utils/addMethod.js");
-require.alias("chaijs-chai/lib/chai/utils/addProperty.js", "lru-cache/deps/chai/lib/chai/utils/addProperty.js");
-require.alias("chaijs-chai/lib/chai/utils/flag.js", "lru-cache/deps/chai/lib/chai/utils/flag.js");
-require.alias("chaijs-chai/lib/chai/utils/getActual.js", "lru-cache/deps/chai/lib/chai/utils/getActual.js");
-require.alias("chaijs-chai/lib/chai/utils/getEnumerableProperties.js", "lru-cache/deps/chai/lib/chai/utils/getEnumerableProperties.js");
-require.alias("chaijs-chai/lib/chai/utils/getMessage.js", "lru-cache/deps/chai/lib/chai/utils/getMessage.js");
-require.alias("chaijs-chai/lib/chai/utils/getName.js", "lru-cache/deps/chai/lib/chai/utils/getName.js");
-require.alias("chaijs-chai/lib/chai/utils/getPathValue.js", "lru-cache/deps/chai/lib/chai/utils/getPathValue.js");
-require.alias("chaijs-chai/lib/chai/utils/getProperties.js", "lru-cache/deps/chai/lib/chai/utils/getProperties.js");
-require.alias("chaijs-chai/lib/chai/utils/index.js", "lru-cache/deps/chai/lib/chai/utils/index.js");
-require.alias("chaijs-chai/lib/chai/utils/inspect.js", "lru-cache/deps/chai/lib/chai/utils/inspect.js");
-require.alias("chaijs-chai/lib/chai/utils/objDisplay.js", "lru-cache/deps/chai/lib/chai/utils/objDisplay.js");
-require.alias("chaijs-chai/lib/chai/utils/overwriteMethod.js", "lru-cache/deps/chai/lib/chai/utils/overwriteMethod.js");
-require.alias("chaijs-chai/lib/chai/utils/overwriteProperty.js", "lru-cache/deps/chai/lib/chai/utils/overwriteProperty.js");
-require.alias("chaijs-chai/lib/chai/utils/overwriteChainableMethod.js", "lru-cache/deps/chai/lib/chai/utils/overwriteChainableMethod.js");
-require.alias("chaijs-chai/lib/chai/utils/test.js", "lru-cache/deps/chai/lib/chai/utils/test.js");
-require.alias("chaijs-chai/lib/chai/utils/transferFlags.js", "lru-cache/deps/chai/lib/chai/utils/transferFlags.js");
-require.alias("chaijs-chai/lib/chai/utils/type.js", "lru-cache/deps/chai/lib/chai/utils/type.js");
-require.alias("chaijs-chai/index.js", "lru-cache/deps/chai/index.js");
-require.alias("chaijs-chai/index.js", "chai/index.js");
-require.alias("chaijs-assertion-error/index.js", "chaijs-chai/deps/assertion-error/index.js");
-require.alias("chaijs-assertion-error/index.js", "chaijs-chai/deps/assertion-error/index.js");
-require.alias("chaijs-assertion-error/index.js", "chaijs-assertion-error/index.js");
-require.alias("chaijs-deep-eql/lib/eql.js", "chaijs-chai/deps/deep-eql/lib/eql.js");
-require.alias("chaijs-deep-eql/lib/eql.js", "chaijs-chai/deps/deep-eql/index.js");
-require.alias("chaijs-type-detect/lib/type.js", "chaijs-deep-eql/deps/type-detect/lib/type.js");
-require.alias("chaijs-type-detect/lib/type.js", "chaijs-deep-eql/deps/type-detect/index.js");
-require.alias("chaijs-type-detect/lib/type.js", "chaijs-type-detect/index.js");
-require.alias("chaijs-deep-eql/lib/eql.js", "chaijs-deep-eql/index.js");
-require.alias("chaijs-chai/index.js", "chaijs-chai/index.js");
-require.alias("lru-cache/index.js", "lru-cache/index.js");
+require("lru-cache")
