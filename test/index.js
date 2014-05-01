@@ -2,7 +2,7 @@
 
 var LRU = require('lru-cache'),
     lf = require('localforage'),
-    Promise = window.Promise,
+    Promise = require('promise'),
     chai = require('chai'),
     expect = chai.expect;
 
@@ -280,9 +280,19 @@ describe('when reloading', function () {
         expect(cache.length).to.eq(1);
       });
   });
-
-
-
-
 });
 
+describe('when private browsing', function () {
+
+  it('should retrieve existing values', function (done) {
+    var cache = new LRU();
+
+    return cache
+      .load()
+      .catch(function(err) {
+        console.log('err:', err);
+        expect(err).to.be.ok;
+      })
+      .then(done);
+  });
+});

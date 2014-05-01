@@ -3,7 +3,8 @@
   "version": "0.1.1",
   "description": "LRU cache for the browser backed by localstorage",
   "dependencies": {
-    "mozilla/localForage": "*"
+    "mozilla/localForage": "*",
+    "then/promise": "*"
   },
   "development": {
     "chaijs/chai": "*"

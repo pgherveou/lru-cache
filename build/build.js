@@ -190,12 +190,12 @@ require.modules["johntron~asap"] = require.modules["johntron~asap@master"];
 require.modules["asap"] = require.modules["johntron~asap@master"];
 
 
-require.register("then~promise@4.0.0", Function("exports, module",
+require.register("then~promise@5.0.0", Function("exports, module",
 "'use strict';\n\
 \n\
 //This file contains then/promise specific extensions to the core promise API\n\
 \n\
-var Promise = require(\"then~promise@4.0.0/core.js\")\n\
+var Promise = require(\"then~promise@5.0.0/core.js\")\n\
 var asap = require(\"johntron~asap@master\")\n\
 \n\
 module.exports = Promise\n\
@@ -225,7 +225,7 @@ var UNDEFINED = new ValuePromise(undefined)\n\
 var ZERO = new ValuePromise(0)\n\
 var EMPTYSTRING = new ValuePromise('')\n\
 \n\
-Promise.from = Promise.cast = function (value) {\n\
+Promise.resolve = function (value) {\n\
   if (value instanceof Promise) return value\n\
 \n\
   if (value === null) return NULL\n\
@@ -250,6 +250,14 @@ Promise.from = Promise.cast = function (value) {\n\
 \n\
   return new ValuePromise(value)\n\
 }\n\
+\n\
+Promise.from = Promise.cast = function (value) {\n\
+  var err = new Error('Promise.from and Promise.cast are deprecated, use Promise.resolve instead')\n\
+  err.name = 'Warning'\n\
+  console.warn(err.stack)\n\
+  return Promise.resolve(value)\n\
+}\n\
+\n\
 Promise.denodeify = function (fn, argumentCount) {\n\
   argumentCount = argumentCount || Infinity\n\
   return function () {\n\
@@ -286,7 +294,14 @@ Promise.nodeify = function (fn) {\n\
 }\n\
 \n\
 Promise.all = function () {\n\
-  var args = Array.prototype.slice.call(arguments.length === 1 && Array.isArray(arguments[0]) ? arguments[0] : arguments)\n\
+  var calledWithArray = arguments.length === 1 && Array.isArray(arguments[0])\n\
+  var args = Array.prototype.slice.call(calledWithArray ? arguments[0] : arguments)\n\
+\n\
+  if (!calledWithArray) {\n\
+    var err = new Error('Promise.all should be called with a single array, calling it with multiple arguments is deprecated')\n\
+    err.name = 'Warning'\n\
+    console.warn(err.stack)\n\
+  }\n\
 \n\
   return new Promise(function (resolve, reject) {\n\
     if (args.length === 0) return resolve([])\n\
@@ -314,6 +329,20 @@ Promise.all = function () {\n\
   })\n\
 }\n\
 \n\
+Promise.reject = function (value) {\n\
+  return new Promise(function (resolve, reject) { \n\
+    reject(value);\n\
+  });\n\
+}\n\
+\n\
+Promise.race = function (values) {\n\
+  return new Promise(function (resolve, reject) { \n\
+    values.forEach(function(value){\n\
+      Promise.resolve(value).then(resolve, reject);\n\
+    })\n\
+  });\n\
+}\n\
+\n\
 /* Prototype Methods */\n\
 \n\
 Promise.prototype.done = function (onFulfilled, onRejected) {\n\
@@ -326,7 +355,7 @@ Promise.prototype.done = function (onFulfilled, onRejected) {\n\
 }\n\
 \n\
 Promise.prototype.nodeify = function (callback) {\n\
-  if (callback === null || typeof callback == 'undefined') return this\n\
+  if (typeof callback != 'function') return this\n\
 \n\
   this.then(function (value) {\n\
     asap(function () {\n\
@@ -339,35 +368,14 @@ Promise.prototype.nodeify = function (callback) {\n\
   })\n\
 }\n\
 \n\
-Promise.prototype.catch = function (onRejected) {\n\
+Promise.prototype['catch'] = function (onRejected) {\n\
   return this.then(null, onRejected);\n\
 }\n\
 \n\
-\n\
-Promise.resolve = function (value) {\n\
-  return new Promise(function (resolve) { \n\
-    resolve(value);\n\
-  });\n\
-}\n\
-\n\
-Promise.reject = function (value) {\n\
-  return new Promise(function (resolve, reject) { \n\
-    reject(value);\n\
-  });\n\
-}\n\
-\n\
-Promise.race = function (values) {\n\
-  return new Promise(function (resolve, reject) { \n\
-    values.map(function(value){\n\
-      Promise.cast(value).then(resolve, reject);\n\
-    })\n\
-  });\n\
-}\n\
-\n\
-//# sourceURL=components/then/promise/4.0.0/index.js"
+//# sourceURL=components/then/promise/5.0.0/index.js"
 ));
 
-require.register("then~promise@4.0.0/core.js", Function("exports, module",
+require.register("then~promise@5.0.0/core.js", Function("exports, module",
 "'use strict';\n\
 \n\
 var asap = require(\"johntron~asap@master\")\n\
@@ -474,12 +482,12 @@ function doResolve(fn, onFulfilled, onRejected) {\n\
   }\n\
 }\n\
 \n\
-//# sourceURL=components/then/promise/4.0.0/core.js"
+//# sourceURL=components/then/promise/5.0.0/core.js"
 ));
 
-require.modules["then-promise"] = require.modules["then~promise@4.0.0"];
-require.modules["then~promise"] = require.modules["then~promise@4.0.0"];
-require.modules["promise"] = require.modules["then~promise@4.0.0"];
+require.modules["then-promise"] = require.modules["then~promise@5.0.0"];
+require.modules["then~promise"] = require.modules["then~promise@5.0.0"];
+require.modules["promise"] = require.modules["then~promise@5.0.0"];
 
 
 require.register("mozilla~localforage@0.7.0", Function("exports, module",
@@ -488,7 +496,7 @@ require.register("mozilla~localforage@0.7.0", Function("exports, module",
 \n\
     // Promises!\n\
     var Promise = (typeof module !== 'undefined' && module.exports) ?\n\
-                  require(\"then~promise@4.0.0\") : this.Promise;\n\
+                  require(\"then~promise@5.0.0\") : this.Promise;\n\
 \n\
     // Avoid those magic constants!\n\
     var MODULE_TYPE_DEFINE = 1;\n\
@@ -684,7 +692,7 @@ require.register("mozilla~localforage@0.7.0/src/drivers/indexeddb.js", Function(
 \n\
     // Promises!\n\
     var Promise = (typeof module !== 'undefined' && module.exports) ?\n\
-                  require(\"then~promise@4.0.0\") : this.Promise;\n\
+                  require(\"then~promise@5.0.0\") : this.Promise;\n\
 \n\
     var db = null;\n\
     var dbInfo = {};\n\
@@ -1000,7 +1008,7 @@ require.register("mozilla~localforage@0.7.0/src/drivers/localstorage.js", Functi
     var dbInfo = {};\n\
     // Promises!\n\
     var Promise = (typeof module !== 'undefined' && module.exports) ?\n\
-                  require(\"then~promise@4.0.0\") : this.Promise;\n\
+                  require(\"then~promise@5.0.0\") : this.Promise;\n\
     var localStorage = null;\n\
 \n\
     // If the app is running inside a Google Chrome packaged webapp, or some\n\
@@ -1399,7 +1407,7 @@ require.register("mozilla~localforage@0.7.0/src/drivers/websql.js", Function("ex
 \n\
     // Promises!\n\
     var Promise = (typeof module !== 'undefined' && module.exports) ?\n\
-                  require(\"then~promise@4.0.0\") : this.Promise;\n\
+                  require(\"then~promise@5.0.0\") : this.Promise;\n\
 \n\
     var openDatabase = this.openDatabase;\n\
     var db = null;\n\
@@ -6516,12 +6524,25 @@ require.modules["chai"] = require.modules["chaijs~chai@1.9.1"];
 
 require.register("lru-cache", Function("exports, module",
 "var lf = require(\"mozilla~localforage@0.7.0\"),\n\
-    Promise = window.Promise;\n\
+    Promise = require(\"then~promise@5.0.0\");\n\
 \n\
 // max size if not specifed\n\
 var MAX_SIZE = 100;\n\
 \n\
 function naiveLength () { return 1; }\n\
+\n\
+/**\n\
+ * create a promise that fails after `ms` milliseconds\n\
+ * @param {ms} Number delay in ms\n\
+ *\n\
+ * @return {Promise}\n\
+ */\n\
+\n\
+function timeout(ms) {\n\
+  return new Promise(function(resolve, reject) {\n\
+    setTimeout(function() { reject(new Error('timeout')); }, ms || 100);\n\
+  });\n\
+}\n\
 \n\
 // function strLength(key, value) {\n\
 //   return key.toString().length + JSON.stringify(value || null).length;\n\
@@ -7017,8 +7038,8 @@ function LRUCache (options) {\n\
    */\n\
 \n\
   this.load = function() {\n\
-    return cache.store\n\
-      .get()\n\
+    return Promise\n\
+      .race([cache.store.get(), timeout()])\n\
       .then(function(items) {\n\
 \n\
         if (!items) return;\n\

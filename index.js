@@ -1,10 +1,23 @@
 var lf = require('localforage'),
-    Promise = window.Promise;
+    Promise = require('promise');
 
 // max size if not specifed
 var MAX_SIZE = 100;
 
 function naiveLength () { return 1; }
+
+/**
+ * create a promise that fails after `ms` milliseconds
+ * @param {ms} Number delay in ms
+ *
+ * @return {Promise}
+ */
+
+function timeout(ms) {
+  return new Promise(function(resolve, reject) {
+    setTimeout(function() { reject(new Error('timeout')); }, ms || 100);
+  });
+}
 
 // function strLength(key, value) {
 //   return key.toString().length + JSON.stringify(value || null).length;
@@ -500,8 +513,8 @@ function LRUCache (options) {
    */
 
   this.load = function() {
-    return cache.store
-      .get()
+    return Promise
+      .race([cache.store.get(), timeout()])
       .then(function(items) {
 
         if (!items) return;
