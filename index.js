@@ -15,7 +15,7 @@ function naiveLength () { return 1; }
 
 function timeout(ms) {
   return new Promise(function(resolve, reject) {
-    setTimeout(function() { reject(new Error('timeout')); }, ms || 100);
+    setTimeout(function() { reject(new Error('timeout')); }, ms || 500);
   });
 }
 
