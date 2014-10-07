@@ -1,5 +1,6 @@
 {
-  "name": "lru-cache",
+  "name": "component-lru-cache",
+  "version": "0.1.5",
   "author": "PG Herveou",
 
   "repository": {
